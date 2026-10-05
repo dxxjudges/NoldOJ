@@ -135,7 +135,7 @@ async function apiCall(method, path, body = null) {
   let res;
   try {
     res = await fetch(`${API_BASE}${path}`, opts);
-  } catch (e) {
+  } catch {
     throw { status: 0, message: 'Network error' };
   }
   let data;
@@ -176,9 +176,15 @@ async function apiCall(method, path, body = null) {
 }
 
 function escapeHtml(s) {
-  const div = document.createElement('div');
-  div.textContent = s;
-  return div.innerHTML;
+  // 必须转义引号：本函数的输出会被拼进属性上下文（如 placeholder="...${escapeHtml(x)}..."），
+  // 仅转义 <>& 时，昵称里一个 " 即可闭合属性注入事件处理器（存储型 XSS → 账号接管，
+  // token 在 localStorage）。与 markdown.js 内实现保持一致。
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function statusColor(status) {
@@ -234,16 +240,17 @@ function roleBadge(role) {
 function renderNav(activePage) {
   try {
     const user = getUser();
-    const isAdmin = user && ['admin', 'su'].includes(user.role);
     const isSu = user && user.role === 'su';
     const isTeacher = user && ['teacher', 'admin', 'su'].includes(user.role);
+    // aria-current: 只有当前页对应的导航项标记为 page，其余不输出属性（等价于非当前）
+    const cur = (p) => (activePage === p ? ' aria-current="page"' : '');
 
     const isDark = document.documentElement.classList.contains('dark');
     const sunIcon = `<svg class="w-5 h-5 dark-toggle-icon ${isDark ? 'hidden' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>`;
     const moonIcon = `<svg class="w-5 h-5 dark-toggle-icon ${isDark ? '' : 'hidden'}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>`;
 
     return `
-    <nav class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50">
+    <nav role="navigation" aria-label="主导航" class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex justify-between h-14">
           <div class="flex items-center space-x-4 flex-shrink-0">
@@ -251,30 +258,30 @@ function renderNav(activePage) {
               <svg class="w-7 h-7 text-indigo-600 dark:text-indigo-400" fill="currentColor" viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>
               <span class="text-xl font-bold text-gray-900 dark:text-white">NoldOJ</span>
             </a>
-            <button onclick="toggleMobileMenu()" class="md:hidden p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700">
+            <button id="mobileMenuBtn" onclick="toggleMobileMenu()" aria-label="切换导航菜单" aria-expanded="false" aria-controls="mobileMenu" class="md:hidden p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700">
               <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
             </button>
             <div class="hidden md:flex space-x-0.5 flex-shrink-0">
-              <a href="/pages/problems.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='problems'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">题库</a>
-              <a href="/pages/problem-sets.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='problem-sets'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">题单</a>
-              <a href="/pages/submissions.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='submissions'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">提交记录</a>
-              <a href="/pages/articles.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='articles'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">文章</a>
-              <a href="/pages/announcements.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='announcements'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">公告</a>
-              <a href="/pages/ide.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='ide'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">在线编程</a>
-              ${isTeacher ? `<a href="/pages/upload.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='upload'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">图床</a>` : ''}
-<a href="/pages/rating.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='rating'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">排行</a>
-              <a href="/pages/wordcloud.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='wordcloud'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">云图</a>
-              <a href="/pages/contests.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='contests'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">比赛</a>
-              <a href="/pages/exams.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='exams'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">试卷</a>
-              ${isTeacher ? `<a href="/pages/admin.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='admin'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">管理</a>` : ''}
-              ${isSu ? `<a href="/pages/languages.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='languages'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">语言</a>` : ''}
+              <a href="/pages/problems.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='problems'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('problems')}>题库</a>
+              <a href="/pages/problem-sets.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='problem-sets'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('problem-sets')}>题单</a>
+              <a href="/pages/submissions.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='submissions'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('submissions')}>提交记录</a>
+              <a href="/pages/articles.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='articles'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('articles')}>文章</a>
+              <a href="/pages/announcements.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='announcements'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('announcements')}>公告</a>
+              <a href="/pages/ide.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='ide'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('ide')}>在线编程</a>
+              ${isTeacher ? `<a href="/pages/upload.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='upload'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('upload')}>图床</a>` : ''}
+<a href="/pages/rating.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='rating'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('rating')}>排行</a>
+              <a href="/pages/wordcloud.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='wordcloud'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('wordcloud')}>云图</a>
+              <a href="/pages/contests.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='contests'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('contests')}>比赛</a>
+              <a href="/pages/exams.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='exams'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('exams')}>试卷</a>
+              ${isTeacher ? `<a href="/pages/admin.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='admin'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('admin')}>管理</a>` : ''}
+              ${isSu ? `<a href="/pages/languages.html" class="px-2 py-1.5 rounded-md text-sm font-medium whitespace-nowrap ${activePage==='languages'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('languages')}>语言</a>` : ''}
             </div>
           </div>
           <div class="flex items-center space-x-2 flex-shrink-0">
-            <button onclick="toggleDarkMode()" class="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title="切换主题">
+            <button onclick="toggleDarkMode()" aria-label="切换深色模式" class="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title="切换主题">
               ${sunIcon}${moonIcon}
             </button>
-            <a href="/pages/announcements.html" onclick="clearAnnouncementUnread()" class="relative p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title="公告">
+            <a href="/pages/announcements.html" onclick="clearAnnouncementUnread()" aria-label="公告" class="relative p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title="公告">
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
               <span id="annBadge" class="hidden absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full px-1.5 min-w-[18px] text-center">0</span>
             </a>
@@ -298,27 +305,27 @@ function renderNav(activePage) {
         </div>
       </div>
     </nav>
-    <div id="mobileMenu" class="hidden md:hidden bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+    <div id="mobileMenu" role="navigation" aria-label="移动导航" class="hidden md:hidden bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
       <div class="max-w-7xl mx-auto px-4 py-3 space-y-1">
-        <a href="/pages/problems.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='problems'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">题库</a>
-        <a href="/pages/problem-sets.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='problem-sets'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">题单</a>
-        <a href="/pages/submissions.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='submissions'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">提交记录</a>
-        <a href="/pages/articles.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='articles'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">文章</a>
-        <a href="/pages/announcements.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='announcements'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">公告</a>
-        <a href="/pages/ide.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='ide'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">在线编程</a>
-        ${isTeacher ? `<a href="/pages/upload.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='upload'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">图床</a>` : ''}
-        <a href="/pages/rating.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='rating'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">排行</a>
-        <a href="/pages/contests.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='contests'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">比赛</a>
-        <a href="/pages/exams.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='exams'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">试卷</a>
-        ${isTeacher ? `<a href="/pages/admin.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='admin'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">管理</a>` : ''}
-        ${isSu ? `<a href="/pages/languages.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='languages'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}">语言</a>` : ''}
+        <a href="/pages/problems.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='problems'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('problems')}>题库</a>
+        <a href="/pages/problem-sets.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='problem-sets'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('problem-sets')}>题单</a>
+        <a href="/pages/submissions.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='submissions'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('submissions')}>提交记录</a>
+        <a href="/pages/articles.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='articles'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('articles')}>文章</a>
+        <a href="/pages/announcements.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='announcements'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('announcements')}>公告</a>
+        <a href="/pages/ide.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='ide'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('ide')}>在线编程</a>
+        ${isTeacher ? `<a href="/pages/upload.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='upload'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('upload')}>图床</a>` : ''}
+        <a href="/pages/rating.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='rating'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('rating')}>排行</a>
+        <a href="/pages/contests.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='contests'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('contests')}>比赛</a>
+        <a href="/pages/exams.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='exams'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('exams')}>试卷</a>
+        ${isTeacher ? `<a href="/pages/admin.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='admin'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('admin')}>管理</a>` : ''}
+        ${isSu ? `<a href="/pages/languages.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='languages'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('languages')}>语言</a>` : ''}
       </div>
     </div>
-    <div id="passwordModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+    <div id="passwordModal" role="dialog" aria-modal="true" aria-labelledby="passwordModalTitle" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
       <div class="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 w-full max-w-md">
-        <h3 class="text-lg font-semibold mb-4 text-gray-900 dark:text-white">修改密码</h3>
-        <input id="oldPwd" type="password" placeholder="当前密码" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg mb-3 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-        <input id="newPwd" type="password" placeholder="新密码" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg mb-4 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+        <h3 id="passwordModalTitle" class="text-lg font-semibold mb-4 text-gray-900 dark:text-white">修改密码</h3>
+        <input id="oldPwd" type="password" placeholder="当前密码" aria-label="当前密码" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg mb-3 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+        <input id="newPwd" type="password" placeholder="新密码" aria-label="新密码" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg mb-4 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
         <div class="flex justify-end space-x-3">
           <button onclick="closePasswordModal()" class="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">取消</button>
           <button onclick="changePassword()" class="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">保存</button>
@@ -327,7 +334,7 @@ function renderNav(activePage) {
     </div>`;
   } catch(e) {
     console.error('renderNav error:', e);
-    return `<nav class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50"><div class="max-w-7xl mx-auto px-4 h-14 flex items-center"><a href="/pages/index.html" class="text-xl font-bold text-gray-900 dark:text-white">NoldOJ</a></div></nav>`;
+    return `<nav role="navigation" aria-label="主导航" class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50"><div class="max-w-7xl mx-auto px-4 h-14 flex items-center"><a href="/pages/index.html" class="text-xl font-bold text-gray-900 dark:text-white">NoldOJ</a></div></nav>`;
   }
 }
 
@@ -336,6 +343,9 @@ function closePasswordModal() { document.getElementById('passwordModal').classLi
 function toggleMobileMenu() {
   const menu = document.getElementById('mobileMenu');
   if (menu) menu.classList.toggle('hidden');
+  // 仅同步 aria 状态（不影响渲染/行为）：折叠按钮需要 aria-expanded 让读屏软件知道菜单是否展开
+  const btn = document.getElementById('mobileMenuBtn');
+  if (btn && menu) btn.setAttribute('aria-expanded', String(!menu.classList.contains('hidden')));
 }
 
 async function changePassword() {
@@ -343,10 +353,10 @@ async function changePassword() {
   const new_password = document.getElementById('newPwd').value;
   try {
     await apiCall('POST', '/auth/change-password', { old_password, new_password });
-    alert('密码修改成功');
+    showToast('密码修改成功', 'success');
     closePasswordModal();
   } catch (e) {
-    alert(e.message || '密码修改失败');
+    showToast(e.message || '密码修改失败', 'error');
   }
 }
 
@@ -396,7 +406,10 @@ function showToast(message, type = 'info') {
   };
   const toast = document.createElement('div');
   toast.className = `${colors[type] || colors.info} text-white px-4 py-3 rounded-xl shadow-lg max-w-sm animate-pulse`;
-  toast.innerHTML = message;
+  // 默认按纯文本渲染（alert 时代的调用方全部是纯文本，err.message/上传校验回显可能含用户输入，
+  // innerHTML 会打开注入面）；pre-line 恢复消息里的换行显示
+  toast.textContent = message;
+  toast.style.whiteSpace = 'pre-line';
   container.appendChild(toast);
   setTimeout(() => {
     toast.style.transition = 'opacity 0.5s';
@@ -441,7 +454,7 @@ async function initSocket() {
         announcementUnread++;
         localStorage.setItem('NoldOJ_ann_unread', announcementUnread);
         updateAnnouncementBadge();
-        showToast(`📢 新公告: ${escapeHtml(msg.data.title)}`, 'info');
+        showToast(`📢 新公告: ${msg.data.title}`, 'info');
       }
     });
 
@@ -587,7 +600,8 @@ function renderPagination(containerId, totalPages, currentPage, loadFn) {
   if (start > 1) html += `<button onclick="${loadFn}(1)" class="px-3 py-1 rounded-lg text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700">1</button>`;
   if (start > 2) html += `<span class="px-2 text-gray-400">...</span>`;
   for (let i = start; i <= end; i++) {
-    html += `<button onclick="${loadFn}(${i})" class="px-3 py-1 rounded-lg text-sm ${i===currentPage?'bg-indigo-600 text-white':'bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}">${i}</button>`;
+    // aria-current="page"：读屏软件据此播报“当前页，第 N 页”，纯属性不改变渲染与点击行为
+  html += `<button onclick="${loadFn}(${i})"${i===currentPage?' aria-current="page"':''} class="px-3 py-1 rounded-lg text-sm ${i===currentPage?'bg-indigo-600 text-white':'bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700'}">${i}</button>`;
   }
   if (end < totalPages - 1) html += `<span class="px-2 text-gray-400">...</span>`;
   if (end < totalPages) html += `<button onclick="${loadFn}(${totalPages})" class="px-3 py-1 rounded-lg text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700">${totalPages}</button>`;

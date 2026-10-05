@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { logWarn } = require('../utils/logger');
 
 function getLogPath() {
   const logDir = process.env.OJ_LOG_DIR;
@@ -29,7 +30,9 @@ function logAdminAction(req, action) {
         safe[k] = SENSITIVE_KEY.test(k) ? '***' : v;
       }
       bodyStr = ' body=' + JSON.stringify(safe).slice(0, 500);
-    } catch {}
+    } catch {
+      // 脱敏序列化失败时省略 body，审计行本身仍会写出
+    }
   }
 
   const line = `[${now}] [${role}] ${username} ${method} ${url} ip=${ip}${bodyStr}${action ? ' ' + action : ''}\n`;
@@ -39,7 +42,10 @@ function logAdminAction(req, action) {
     const dir = path.dirname(logPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(logPath, line, 'utf8');
-  } catch {}
+  } catch (e) {
+    // 审计行落盘失败属于审计缺口，不能静默
+    logWarn('ADMINLOG', `write admin.log failed: ${e && e.message}`);
+  }
 }
 
 function adminLogger(req, res, next) {

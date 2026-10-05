@@ -10,8 +10,9 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "lint": "eslint .",
-    "test": "node --test test/scorer.test.js test/compare.test.js test/ratelimit.test.js test/plagiarism.test.js test/exams.test.js test/exam-import.test.js test/exam-program.test.js test/exam-leaderboard.test.js test/contests.test.js test/sandbox.test.js test/init-password.test.js",
-    "test:server": "node --test test/security.test.js test/reset-login.test.js"
+    "lint:frontend": "cd ../frontend && eslint .",
+    "test": "node --test test/scorer.test.js test/compare.test.js test/ratelimit.test.js test/plagiarism.test.js test/exams.test.js test/exam-import.test.js test/exam-program.test.js test/exam-leaderboard.test.js test/contests.test.js test/sandbox.test.js test/init-password.test.js test/frontend-markdown.test.js test/frontend-api.test.js",
+    "test:server": "node --test --test-concurrency=1 test/security.test.js test/reset-login.test.js"
   },
   "dependencies": {
     "adm-zip": "^0.6.0",
@@ -19,6 +20,7 @@
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "express": "^4.22.2",
+    "express-async-errors": "^3.1.1",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",

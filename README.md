@@ -18,7 +18,7 @@
 > cd backend\sandbox
 > build.bat
 > ```
-> 未编译时自动回退到传统模式（spawn），安全性较低。
+> 未编译时 Windows 默认 fail-closed 拒绝判题（不再静默裸跑）；本地开发可显式设 `NoldOJ_ALLOW_NO_SANDBOX=1` 回退传统模式（spawn，安全性较低）。
 
 专为 Windows 平台设计的在线评测系统，支持多语言代码评测、安全沙箱执行、自定义计分脚本、比赛管理、文章系统、Rating 机制、AI 代码安全审查、黑夜模式、SVG 图形验证码、模糊搜索、公告系统、题目标签与难度、代码 Diff 对比、多文件提交、WebSocket 实时推送、排行榜冻结、题单训练计划、讨论/题解区、虚拟比赛、代码查重等功能。
 
@@ -26,7 +26,7 @@
 
 ### 评测核心
 - **多语言支持**：C、C++、Python 3、Java、JavaScript，可通过管理面板动态添加/禁用
-- **安全沙箱**：基于 Windows 原生 Job Object 的进程隔离（CREATE_SUSPENDED + KILL_ON_JOB_CLOSE + 禁用 Breakaway），CPU/内存/进程数受限，每次判题使用独立临时目录；低完整性级别（Low IL）强制 workDir 降级，禁止向高完整性对象写入；受限令牌（禁用 Administrators 等特权组 + 剥离 SeDebug/SeImpersonate 等高危特权）在普通用户下即可生效；以管理员/服务运行时额外尝试 AppContainer 文件系统+网络隔离（容器令牌在独立子进程构建，API 崩溃时自动安全回退到受限令牌，不影响输出捕获）；未编译 sandbox_runner.exe 时自动回退到传统模式（spawn）；所有沙箱诊断消息追加写入 `log/sandbox.log`（亦可设 `NoldOJ_ROOT` 指定项目根）
+- **安全沙箱**：基于 Windows 原生 Job Object 的进程隔离（CREATE_SUSPENDED + KILL_ON_JOB_CLOSE + 禁用 Breakaway），CPU/内存/进程数受限，每次判题使用独立临时目录；低完整性级别（Low IL）强制 workDir 降级，禁止向高完整性对象写入；受限令牌（禁用 Administrators 等特权组 + 剥离 SeDebug/SeImpersonate 等高危特权）在普通用户下即可生效；以管理员/服务运行时额外尝试 AppContainer 文件系统+网络隔离（容器令牌在独立子进程构建，API 崩溃时自动安全回退到受限令牌，不影响输出捕获）；未编译 sandbox_runner.exe 时默认 fail-closed 拒绝判题（`NoldOJ_ALLOW_NO_SANDBOX=1` 才回退传统模式）；所有沙箱诊断消息追加写入 `log/sandbox.log`（亦可设 `NoldOJ_ROOT` 指定项目根）
 - **内存检测**：每个测试点和 IDE 运行均记录峰值内存使用量
 - **多种比较模式**：严格文本比较、宽松文本比较、浮点数容差比较、Special Judge
 - **自定义计分脚本**：支持变量、算术运算、位运算、逻辑运算、条件分支（支持括号）、min/max/abs 函数
@@ -212,7 +212,7 @@
 - **封禁全拦截**：封禁用户的 Access Token 和 Refresh Token 均被拒绝
 - **图形验证码**：登录和注册需通过 SVG 图形验证码验证，防止自动化攻击
 - **注册限流**：单个 IP 每小时仅可注册 1 次
-- **速率限制**：提交和 IDE 运行接口均有令牌桶限流
+- **速率限制**：提交和 IDE 运行接口均有固定窗口限流（`windowMs` 内计数超过 `max` 即返回 429）
 - **输入校验**：SQL 注入防护、源码大小限制（128KB）、语言可用性检查
 - **沙箱隔离**：用户代码在独立临时目录执行，结束后自动清理
 
@@ -243,8 +243,9 @@
 
 输入
 ```batch
-git clone https://github.com/dxxjudges/NoldOJ.git
+git clone https://gitee.com/dxx114514/NoldOJ.git
 ```
+GitHub 镜像：https://github.com/dxxjudges/NoldOJ
 完成后运行`start.bat`
 
 **首次启动时自动迁移 problems/ 目录**：
@@ -279,10 +280,10 @@ npm run lint        :: ESLint 静态检查
 npm run test:server :: 黑盒安全/登录测试（需服务已启动，见下）
 ```
 
-- `npm test` 覆盖计分脚本解释器、输出比较、限流、查重、考试/比赛、Excel 导入、沙箱真实编译、初始管理员口令策略共 9 个文件。
+- `npm test` 覆盖计分脚本解释器、输出比较、限流、查重、考试/比赛、Excel 导入、沙箱真实编译、初始管理员口令策略共 11 个文件。
 - 需要数据库的测试自动使用 `%TEMP%\NoldOJ-test\` 下的独立库，**不读写生产库** `backend/data/NoldOJ.db`，测试中断也不会留下脏数据。
 - `sandbox.test.js` 会真实调用 g++ 编译 C++，未安装 MinGW 的环境自动跳过这 3 个用例。
-- `test:server` 包含 `security.test.js`（CSP/CORS/上传伪装/SPJ 逃逸/登录爆破等黑盒用例）与 `reset-login.test.js`，共 24 项；执行前须在**另一窗口**以调试模式启动服务（否则登录被验证码 403 拦截）：
+- `test:server` 包含 `security.test.js`（CSP/CORS/上传伪装/SPJ 逃逸/登录爆破等黑盒用例，24 项）与 `reset-login.test.js`（已重写为真断言，6 项断言）；执行前须在**另一窗口**以调试模式启动服务（否则登录被验证码 403 拦截）：
   ```batch
   set NoldOJ_CAPTCHA_DEBUG=1
   npm start
@@ -333,7 +334,7 @@ v1.8.0 起数据库引擎从 `sql.js`（WASM 内存库，每次写操作整库�
 
 ### 配置文件
 
-配置以 `config/` 目录下的配置文件为主；另有一批环境变量可覆盖部署行为（`PORT`、`DB_PATH`、`COOKIE_SECURE`、`SANDBOX_TEMP`、`NoldOJ_PROBLEMS_DIR`、`NoldOJ_JUDGE_THREADS`、`TRUST_PROXY`、`OJ_LOG_DIR`、`NoldOJ_REQUIRE_RUNNER` 等，完整表见 [wiki 配置说明](https://github.com/dxxjudges/NoldOJ/wiki/Configuration)）。
+配置以 `config/` 目录下的配置文件为主；另有一批环境变量可覆盖部署行为（`PORT`、`DB_PATH`、`COOKIE_SECURE`、`SANDBOX_TEMP`、`NoldOJ_PROBLEMS_DIR`、`NoldOJ_JUDGE_THREADS`、`TRUST_PROXY`、`OJ_LOG_DIR`、`NoldOJ_ALLOW_NO_SANDBOX`（Windows 缺 `sandbox_runner.exe` 时默认 fail-closed 拒绝判题，设为 `1` 才允许无沙箱回退）等，完整表见 [wiki 配置说明](https://github.com/dxxjudges/NoldOJ/wiki/Configuration)）。
 
 > **配置示例**：`example-config/` 目录提供了 `ai/cors/email/register` 四个配置示例（含字段说明与默认值），
 > 可直接 `copy example-config\* config\` 后按需修改。`config/` 目录已在 `.gitignore` 中忽略，
@@ -440,7 +441,7 @@ NoldOJ/
 │   ├── routes/             # API 路由（22 个文件，21 组，163 个端点）
 │   ├── services/           # 评测引擎 + IDE 评测 + AI 安全审查 + 验证码 + 查重
 │   ├── sandbox/            # 代码执行沙箱 + 计分脚本解释器
-│   ├── test/               # 测试（13 个文件：`npm test` 单测 104 项 + 黑盒 `test:server` 24 项）
+│   ├── test/               # 测试（15 个文件：`npm test` 单测 104 项 + 黑盒 `test:server` security 24 项 + reset-login 6 项断言）
 │   └── src/                # 服务器入口
 ├── frontend/
 │   ├── css/                # 全局样式（含暗色模式覆盖）

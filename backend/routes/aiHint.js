@@ -1,7 +1,10 @@
 const express = require('express');
-const db = require('../database/db');
+const aiHintRepo = require('../repositories/aiHint');
 const { requireAuth } = require('../middleware/auth');
 const { sanitizeLog } = require('../utils/securityHelpers');
+
+const { sendNotFound } = require('../utils/apiErrors');
+const { logError } = require('../utils/logger');
 
 const router = express.Router();
 
@@ -18,24 +21,7 @@ function pruneCooldown() {
   }
 }
 
-// 计算用户对该题已提交但未 AC 的次数（用于门槛）
-function failedAttempts(userId, problemId) {
-  const row = db.prepare(`
-    SELECT COUNT(*) as c FROM submissions
-    WHERE user_id = ? AND problem_id = ? AND exam_id IS NULL
-      AND status IN ('wrong_answer','time_limit_exceeded','memory_limit_exceeded','runtime_error','compile_error')
-  `).get(userId, problemId);
-  return row?.c || 0;
-}
-
-// 取用户最近一次提交（供 AI 参考）
-function lastSubmission(userId, problemId) {
-  return db.prepare(`
-    SELECT source_code, language FROM submissions
-    WHERE user_id = ? AND problem_id = ? AND exam_id IS NULL
-    ORDER BY id DESC LIMIT 1
-  `).get(userId, problemId);
-}
+// 计算用户对该题已提交但未 AC 的次数（用于门槛）与最近一次提交：见 repositories/aiHint.js
 
 const HINT_PROMPT = `你是一位温和的算法教练。请根据题目和用户代码，给出下一步的思路提示。
 
@@ -49,13 +35,13 @@ const HINT_PROMPT = `你是一位温和的算法教练。请根据题目和用�
 // POST /api/v1/problems/:id/hint   body: {}
 router.post('/:id/hint', requireAuth, async (req, res) => {
   const problemId = parseInt(req.params.id);
-  const problem = db.prepare('SELECT * FROM problems WHERE id = ?').get(problemId);
+  const problem = aiHintRepo.getProblem(problemId);
   if (!problem) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Problem not found.' });
+    return sendNotFound(res, 'Problem not found.');
   }
 
   // 门槛：至少 2 次未 AC 的提交才能要提示
-  const fails = failedAttempts(req.user.id, problemId);
+  const fails = aiHintRepo.countFailedAttempts(req.user.id, problemId);
   if (fails < 2) {
     return res.status(403).json({
       code: 6, reason: 'ERR_FORBIDDEN',
@@ -79,7 +65,7 @@ if (!aiEnabled(config.ai.hint)) {
     return res.status(503).json({ code: 2, reason: 'ERR_INVALID_STATE', message: 'AI 服务未启用，请先在 config/ai.txt 中启用。' });
   }
 
-  const sub = lastSubmission(req.user.id, problemId);
+  const sub = aiHintRepo.getLastSubmission(req.user.id, problemId);
   const userMsg = `题目标题: ${problem.title}
 ${problem.background ? `题目背景:\n${problem.background}\n\n` : ''}题目描述:
 ${problem.description}
@@ -103,7 +89,7 @@ ${(sub?.source_code || '').slice(0, 6000)}
     const hint = await aiChat(HINT_PROMPT, userMsg, { cfg: config.ai.hint, numPredict: 1500, timeoutMs: 90000 });
     res.json({ hint: hint.trim() });
   } catch (err) {
-    console.error(`AI hint error for problem ${problemId}:`, sanitizeLog(String(err.message || err)));
+    logError('AIHINT', `AI hint error for problem ${problemId}:`, sanitizeLog(String(err.message || err)));
     res.status(502).json({ code: 2, reason: 'ERR_INVALID_STATE', message: 'AI 提示生成失败，请检查 AI 服务是否可用。' });
   }
 });

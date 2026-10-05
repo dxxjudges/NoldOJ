@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const db = require('../database/db');
 const config = require('../config/config');
 const { hmacDigest } = require('../utils/securityHelpers');
+const { logInfo, logError } = require('../utils/logger');
 
 // 使用 CSPRNG (crypto.randomInt) 生成 6 位验证码，避免 Math.random 可预测
 function generateCode() {
@@ -13,7 +14,7 @@ async function sendCodeEmail(email, code, opts) {
   const { subject, title, hint } = opts || {};
   if (!config.email.enabled || !config.email.apiKey) {
     // 邮件禁用时不在控制台打印明文验证码，避免泄露
-    console.log('[Email] Skipped (disabled).');
+    logInfo('Email', 'Skipped (disabled).');
     return true;
   }
   try {
@@ -31,12 +32,12 @@ async function sendCodeEmail(email, code, opts) {
     });
     // Resend v6 的 send 返回 { data, error } 而非抛错，需显式检查 error 字段
     if (result && result.error) {
-      console.error('[Email] Resend returned error:', result.error.message || JSON.stringify(result.error));
+      logError('Email', 'Resend returned error:', result.error.message || JSON.stringify(result.error));
       return false;
     }
     return true;
   } catch (err) {
-    console.error('[Email] Send failed:', err.message);
+    logError('Email', 'Send failed:', err.message);
     return false;
   }
 }

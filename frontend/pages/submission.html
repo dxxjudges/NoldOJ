@@ -36,7 +36,7 @@
 <body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
   <div id="nav"></div>
   <div class="max-w-5xl mx-auto px-4 py-8">
-    <div id="content" class="text-center py-12 text-gray-400 dark:text-gray-500 dark:text-gray-400">加载中...</div>
+    <div id="content" aria-live="polite" class="text-center py-12 text-gray-400 dark:text-gray-500 dark:text-gray-400">加载中...</div>
   </div>
   <script>
     document.getElementById('nav').innerHTML = renderNav('submissions');
@@ -213,10 +213,10 @@
                 </div>
               </div>
               ${(s.files && s.files.length > 1) ? `
-                <div id="submissionFileTabs" class="flex items-center space-x-1 mb-2 flex-wrap"></div>
-                <textarea id="codeArea">${escapeHtml(s.files[0].content)}</textarea>
+                <div id="submissionFileTabs" role="tablist" aria-label="源文件" class="flex items-center space-x-1 mb-2 flex-wrap"></div>
+                <textarea id="codeArea" aria-label="提交的源代码">${escapeHtml(s.files[0].content)}</textarea>
               ` : `
-                <textarea id="codeArea">${escapeHtml(s.source_code)}</textarea>
+                <textarea id="codeArea" aria-label="提交的源代码">${escapeHtml(s.source_code)}</textarea>
               `}
               <div id="codeDiffPanel" class="hidden mt-3 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
                 <div class="px-4 py-2 bg-gray-50 dark:bg-gray-700 flex items-center justify-between">
@@ -257,7 +257,7 @@
               const tabsBar = document.getElementById('submissionFileTabs');
               if (tabsBar) {
                 tabsBar.innerHTML = s.files.map((f, i) => `
-                  <div class="file-tab ${i === 0 ? 'active' : ''} px-3 py-1.5 rounded-t-lg text-sm font-medium" onclick="switchSubmissionFile(${i})" data-idx="${i}">
+                  <div role="tab" aria-selected="${i === 0}" tabindex="0" class="file-tab ${i === 0 ? 'active' : ''} px-3 py-1.5 rounded-t-lg text-sm font-medium" onclick="switchSubmissionFile(${i})" data-idx="${i}">
                     ${escapeHtml(f.filename)}
                   </div>
                 `).join('');
@@ -268,6 +268,7 @@
                   window._submissionCM.setValue(window._submissionFiles[idx].content);
                   document.querySelectorAll('#submissionFileTabs .file-tab').forEach((el, i) => {
                     el.classList.toggle('active', i === idx);
+                    el.setAttribute('aria-selected', String(i === idx));
                   });
                 };
               }
@@ -371,9 +372,9 @@
       if (!confirm('确定重新评测此提交？')) return;
       try {
         await apiCall('POST', `/submissions/${id}/rejudge`);
-        alert('已加入重测队列');
+        showToast('已加入重测队列', 'success');
         setTimeout(() => loadSubmission(), 2000);
-      } catch (err) { alert(err.message); }
+      } catch (err) { showToast(err.message, 'error'); }
     }
 
     function copyCode(btn) {

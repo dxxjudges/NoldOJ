@@ -1,6 +1,7 @@
 const db = require('../database/db');
 const config = require('../config/config');
 const { prepareWorkDir, compile, runCode, cleanupWorkDir, loadLanguageConfig } = require('../sandbox/executor');
+const { logError, logWarn } = require('../utils/logger');
 
 const ideQueue = [];
 const IDE_QUEUE_LIMIT = 100;
@@ -21,7 +22,7 @@ async function processIdeQueue() {
   try {
     await executeIdeRun(runId);
   } catch (err) {
-    console.error(`IDE run error for #${runId}:`, err);
+    logError('IDEJUDGE', `IDE run error for #${runId}:`, err);
     db.prepare("UPDATE ide_runs SET status = 'system_error', stderr = ? WHERE id = ?").run(stripPaths(String(err.message || err || 'Unknown error')), runId);
   } finally {
     // 必须放在 finally：catch 里的 db/stripPaths 自身也可能抛错，
@@ -82,7 +83,10 @@ function enqueueIdeRun(runId) {
   if (ideQueue.length >= IDE_QUEUE_LIMIT) {
     try {
       db.prepare("UPDATE ide_runs SET status = 'system_error', stderr = 'Server queue is full, please retry later.' WHERE id = ?").run(runId);
-    } catch {}
+    } catch (e) {
+      // 状态写失败会令该 run 永久停在排队态，必须可见
+      logWarn('IDEJUDGE', `标记 IDE 任务队列溢出失败 (run ${runId}): ${e && e.message}`);
+    }
     return;
   }
   ideQueue.push(runId);

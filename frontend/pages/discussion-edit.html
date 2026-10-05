@@ -8,9 +8,9 @@
   <link rel="stylesheet" href="/css/prose.css">
   <script src="/js/tailwind.js"></script>
   <script>tailwind.config={darkMode:'class'}</script>
-  <script src="/js/marked.min.js"></script>
   <script src="/js/purify.min.js"></script>
   <script src="/js/api.js"></script>
+  <script src="/js/markdown.js"></script>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
   <div id="nav"></div>
@@ -18,15 +18,15 @@
     <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6" id="pageTitle">发帖</h1>
     <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm dark:shadow-gray-900/30 border border-gray-100 dark:border-gray-700 p-6 space-y-4">
       <div>
-        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">标题</label>
+        <label for="dTitle" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">标题</label>
         <input id="dTitle" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white" placeholder="讨论标题">
       </div>
       <div>
-        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">内容（Markdown）</label>
+        <label for="dContent" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">内容（Markdown）</label>
         <div class="grid grid-cols-2 gap-4">
           <textarea id="dContent" rows="14" oninput="renderPreview()" class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white font-mono text-sm" placeholder="支持 Markdown 语法..."></textarea>
           <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-3 overflow-y-auto bg-gray-50 dark:bg-gray-900" style="max-height: 360px;">
-            <div id="dPreview" class="prose dark:prose-invert max-w-none text-sm"></div>
+            <div id="dPreview" aria-live="polite" class="prose dark:prose-invert max-w-none text-sm"></div>
           </div>
         </div>
       </div>
@@ -36,7 +36,7 @@
       </div>
       <div class="flex justify-between pt-4 border-t border-gray-100 dark:border-gray-700">
         <a href="javascript:history.back()" class="px-4 py-2 text-gray-600 dark:text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-sm">返回</a>
-        <button onclick="save()" class="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700">发布</button>
+        <button onclick="save()" class="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-semibold hover:bg-indigo-700" aria-label="发布讨论">发布</button>
       </div>
     </div>
   </div>
@@ -62,8 +62,8 @@
           document.getElementById('dOfficial').checked = !!d.is_official;
           renderPreview();
         } catch (err) {
-          alert(err.message || '加载失败');
-          window.history.back();
+          showToast(err.message || '加载失败', 'error');
+          setTimeout(() => { window.history.back(); }, 900);
         }
       } else {
         document.getElementById('pageTitle').textContent = problemId ? '发帖（题目讨论）' : contestId ? '发帖（比赛讨论）' : '发帖';
@@ -72,20 +72,15 @@
 
     function renderPreview() {
       const text = document.getElementById('dContent').value;
-      try {
-        const html = marked.parse(text || '*预览区*');
-        document.getElementById('dPreview').innerHTML = DOMPurify.sanitize(html);
-      } catch {
-        document.getElementById('dPreview').textContent = text;
-      }
+      document.getElementById('dPreview').innerHTML = renderMarkdown(text || '*预览区*');
     }
     renderPreview();
 
     async function save() {
       const title = document.getElementById('dTitle').value.trim();
       const content = document.getElementById('dContent').value.trim();
-      if (!title) { alert('请输入标题'); return; }
-      if (!content) { alert('请输入内容'); return; }
+      if (!title) { showToast('请输入标题', 'error'); return; }
+      if (!content) { showToast('请输入内容', 'error'); return; }
       try {
         if (did) {
           await apiCall('PUT', `/discussions/${did}`, { title, content });
@@ -98,7 +93,7 @@
           const created = await apiCall('POST', '/discussions', body);
           window.location.href = `/pages/discussion.html?id=${created.id}`;
         }
-      } catch (err) { alert(err.message || '保存失败'); }
+      } catch (err) { showToast(err.message || '保存失败', 'error'); }
     }
   </script>
 </body>

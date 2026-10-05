@@ -31,23 +31,23 @@
         <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">基本信息</h2>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="md:col-span-2">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">试卷标题 *</label>
+            <label for="f-title" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">试卷标题 *</label>
             <input id="f-title" type="text" class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white">
           </div>
           <div class="md:col-span-2">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">描述</label>
+            <label for="f-desc" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">描述</label>
             <textarea id="f-desc" rows="2" class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white resize-y"></textarea>
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">时间限制（分钟，0=不限时）</label>
+            <label for="f-time" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">时间限制（分钟，0=不限时）</label>
             <input id="f-time" type="number" value="0" min="0" class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white">
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">及格分</label>
+            <label for="f-pass" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">及格分</label>
             <input id="f-pass" type="number" value="0" min="0" class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white">
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">最大尝试次数（0=不限）</label>
+            <label for="f-attempts" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">最大尝试次数（0=不限）</label>
             <input id="f-attempts" type="number" value="1" min="0" class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white">
           </div>
           <div class="flex items-center gap-6">
@@ -64,15 +64,15 @@
         <h2 class="text-lg font-bold text-gray-900 dark:text-white mb-4">时间窗与排行榜</h2>
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">开考时间（留空=不限）</label>
+            <label for="f-start" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">开考时间（留空=不限）</label>
             <input id="f-start" type="datetime-local" class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white">
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">结束时间（留空=不限）</label>
+            <label for="f-end" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">结束时间（留空=不限）</label>
             <input id="f-end" type="datetime-local" class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white">
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">结束前 N 分钟自动封榜（0=不自动）</label>
+            <label for="f-freeze" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">结束前 N 分钟自动封榜（0=不自动）</label>
             <input id="f-freeze" type="number" value="0" min="0" max="10080" class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white">
           </div>
           <div class="flex flex-col gap-2 justify-center">
@@ -90,7 +90,7 @@
           <div class="flex flex-wrap items-center gap-2">
             <button onclick="document.getElementById('examImportInput').click()"
               class="px-3.5 py-2 bg-green-600 hover:bg-green-700 text-white text-sm rounded-xl transition">Excel 导入</button>
-            <input type="file" id="examImportInput" accept=".xlsx,.xls,.csv" class="hidden" onchange="handleExamImport(this)">
+            <input type="file" id="examImportInput" aria-label="导入试卷文件" accept=".xlsx,.xls,.csv" class="hidden" onchange="handleExamImport(this)">
             <button onclick="downloadExamTemplate()"
               class="px-3.5 py-2 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition">下载模板</button>
             <a href="/exam-sample.xlsx" download="NoldOJ试卷题目示例.xlsx"
@@ -215,7 +215,7 @@
         });
         renderQuestions();
       } catch (err) {
-        alert(err.message || '加载失败');
+        showToast(err.message || '加载失败', 'error');
       }
     }
 
@@ -276,13 +276,13 @@
                 ${q.options.map((opt, oi) => `
                   <div class="option-row">
                     <span class="w-6 text-center font-medium text-gray-500">${String.fromCharCode(65 + oi)}</span>
-                    <input value="${escapeHtml(opt)}" onchange="updateOption(${q._id}, ${oi}, this.value)"
+                    <input value="${escapeHtml(opt)}" onchange="updateOption(${q._id}, ${oi}, this.value)" aria-label="选项 ${String.fromCharCode(65 + oi)}"
                       class="flex-1 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700 dark:text-white">
-                    <button onclick="removeOption(${q._id}, ${oi})" class="text-red-400 hover:text-red-600 text-sm">✕</button>
+                    <button onclick="removeOption(${q._id}, ${oi})" aria-label="删除选项 ${String.fromCharCode(65 + oi)}" class="text-red-400 hover:text-red-600 text-sm">✕</button>
                   </div>
                 `).join('')}
               </div>
-              <button onclick="addOption(${q._id})" class="mt-2 text-sm text-indigo-600 dark:text-indigo-400 hover:underline">+ 添加选项</button>
+              <button onclick="addOption(${q._id})" aria-label="添加选项" class="mt-2 text-sm text-indigo-600 dark:text-indigo-400 hover:underline">+ 添加选项</button>
             </div>
           `;
         } else if (q.question_type === 'true_false') {
@@ -291,7 +291,7 @@
           optionsHtml = `
             <div class="mt-3 flex items-center gap-4">
               <label class="flex items-center gap-2">
-                <input type="checkbox" ${q.is_subjective ? 'checked' : ''} onchange="questions[${i}].is_subjective = this.checked ? 1 : 0; renderQuestions()"
+                <input type="checkbox" ${q.is_subjective ? 'checked' : ''} onchange="questions[${i}].is_subjective = this.checked ? 1 : 0; renderQuestions()" aria-label="第 ${i + 1} 题为主观题"
                 class="w-4 h-4 text-indigo-600 rounded">
                 <span class="text-sm text-gray-700 dark:text-gray-300">主观题（需人工/AI 评分）</span>
               </label>
@@ -305,42 +305,42 @@
               <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
                   <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">题面描述（Markdown）</label>
-                  <textarea rows="5" onchange="questions[${i}].program.description = this.value"
+                  <textarea rows="5" onchange="questions[${i}].program.description = this.value" aria-label="第 ${i + 1} 题的题面描述"
                     class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white text-sm font-mono resize-y"
                     placeholder="题目完整描述...">${escapeHtml(pg.description)}</textarea>
                 </div>
                 <div>
                   <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">背景（可选）</label>
-                  <textarea rows="5" onchange="questions[${i}].program.background = this.value"
+                  <textarea rows="5" onchange="questions[${i}].program.background = this.value" aria-label="第 ${i + 1} 题的背景"
                     class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white text-sm font-mono resize-y"
                     placeholder="题目背景故事...">${escapeHtml(pg.background)}</textarea>
                 </div>
                 <div>
                   <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">输入格式</label>
-                  <textarea rows="2" onchange="questions[${i}].program.input_desc = this.value"
+                  <textarea rows="2" onchange="questions[${i}].program.input_desc = this.value" aria-label="第 ${i + 1} 题的输入格式"
                     class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white text-sm font-mono resize-y">${escapeHtml(pg.input_desc)}</textarea>
                 </div>
                 <div>
                   <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">输出格式</label>
-                  <textarea rows="2" onchange="questions[${i}].program.output_desc = this.value"
+                  <textarea rows="2" onchange="questions[${i}].program.output_desc = this.value" aria-label="第 ${i + 1} 题的输出格式"
                     class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white text-sm font-mono resize-y">${escapeHtml(pg.output_desc)}</textarea>
                 </div>
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">提示（可选）</label>
-                <textarea rows="2" onchange="questions[${i}].program.hint = this.value"
+                <textarea rows="2" onchange="questions[${i}].program.hint = this.value" aria-label="第 ${i + 1} 题的提示"
                   class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white text-sm font-mono resize-y">${escapeHtml(pg.hint)}</textarea>
               </div>
               <div class="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
                 <div>
                   <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">时限 (ms)</label>
-                  <input type="number" value="${pg.time_limit}" min="1" max="10000"
+                  <input type="number" value="${pg.time_limit}" min="1" max="10000" aria-label="第 ${i + 1} 题的时限 (ms)"
                     onchange="questions[${i}].program.time_limit = Number(this.value)"
                     class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700 dark:text-white">
                 </div>
                 <div>
                   <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">内存 (MB)</label>
-                  <input type="number" value="${pg.memory_limit}" min="1" max="1024"
+                  <input type="number" value="${pg.memory_limit}" min="1" max="1024" aria-label="第 ${i + 1} 题的内存 (MB)"
                     onchange="questions[${i}].program.memory_limit = Number(this.value)"
                     class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700 dark:text-white">
                 </div>
@@ -349,7 +349,7 @@
                   <div class="flex flex-wrap gap-x-4 gap-y-1 pt-1">
                     ${langList.map(l => `
                       <label class="flex items-center gap-1.5">
-                        <input type="checkbox" ${isAllowed(l.name) ? 'checked' : ''} onchange="toggleProgLang(${q._id}, '${l.name}', this.checked)"
+                        <input type="checkbox" ${isAllowed(l.name) ? 'checked' : ''} onchange="toggleProgLang(${q._id}, '${l.name}', this.checked)" aria-label="允许使用 ${escapeHtml(l.display_name)}"
                           class="w-4 h-4 text-indigo-600 rounded">
                         <span class="text-sm text-gray-700 dark:text-gray-300">${escapeHtml(l.display_name)}</span>
                       </label>
@@ -363,7 +363,7 @@
                   <div class="flex items-center gap-2">
                     <button type="button" onclick="addTc(${q._id})" class="px-2.5 py-1 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50">+ 添加测试点</button>
                     <button type="button" onclick="document.getElementById('zip-${q._id}').click()" class="px-2.5 py-1 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 text-xs rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50">📦 上传 ZIP</button>
-                    <input type="file" id="zip-${q._id}" accept=".zip" class="hidden" onchange="pickZip(${q._id}, this)">
+                    <input type="file" id="zip-${q._id}" aria-label="上传第 ${i + 1} 题的测试数据 ZIP" accept=".zip" class="hidden" onchange="pickZip(${q._id}, this)">
                   </div>
                 </div>
                 <p class="text-xs text-gray-400 mb-2">ZIP 结构：<code>1.in/1.out</code> 平铺在根目录，或 <code>sub1/1.in</code> 子目录作为 subtask；限 ~7MB</p>
@@ -387,13 +387,13 @@
                             <input type="text" value="${escapeHtml(tc.subtask)}" placeholder="可选" onchange="questions[${i}].program.testcases[${ti}].subtask = this.value"
                               class="w-24 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded-lg text-xs dark:bg-gray-700 dark:text-white">
                           </label>
-                          ${pg.testcases.length > 1 ? `<button type="button" onclick="removeTc(${q._id}, ${ti})" class="text-red-400 hover:text-red-600 text-xs">删除</button>` : ''}
+                          ${pg.testcases.length > 1 ? `<button type="button" onclick="removeTc(${q._id}, ${ti})" aria-label="删除测试点" class="text-red-400 hover:text-red-600 text-xs">删除</button>` : ''}
                         </div>
                       </div>
                       <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        <textarea placeholder="输入数据 (input)" rows="3" onchange="questions[${i}].program.testcases[${ti}].input = this.value"
+                        <textarea placeholder="输入数据 (input)" aria-label="测试点 ${ti + 1} 输入数据" rows="3" onchange="questions[${i}].program.testcases[${ti}].input = this.value"
                           class="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-xs font-mono dark:bg-gray-700 dark:text-white resize-y">${escapeHtml(tc.input)}</textarea>
-                        <textarea placeholder="期望输出 (output)" rows="3" onchange="questions[${i}].program.testcases[${ti}].output = this.value"
+                        <textarea placeholder="期望输出 (output)" aria-label="测试点 ${ti + 1} 期望输出" rows="3" onchange="questions[${i}].program.testcases[${ti}].output = this.value"
                           class="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-xs font-mono dark:bg-gray-700 dark:text-white resize-y">${escapeHtml(tc.output)}</textarea>
                       </div>
                     </div>
@@ -411,7 +411,7 @@
             <div class="flex items-center justify-between mb-3">
               <div class="flex items-center gap-3">
                 <span class="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold text-sm">${i + 1}</span>
-                <select onchange="changeType(${q._id}, this.value)"
+                <select onchange="changeType(${q._id}, this.value)" aria-label="第 ${i + 1} 题的题型"
                   class="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700 dark:text-white">
                   <option value="choice" ${q.question_type==='choice'?'selected':''}>选择题</option>
                   <option value="true_false" ${q.question_type==='true_false'?'selected':''}>判断题</option>
@@ -419,16 +419,16 @@
                   <option value="long_answer" ${q.question_type==='long_answer'?'selected':''}>大题</option>
                   <option value="program" ${q.question_type==='program'?'selected':''}>编程题</option>
                 </select>
-                <input type="number" value="${q.score}" min="0" onchange="questions[${i}].score = Number(this.value)"
+                <input type="number" value="${q.score}" min="0" onchange="questions[${i}].score = Number(this.value)" aria-label="第 ${i + 1} 题分值"
                   class="w-20 px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm dark:bg-gray-700 dark:text-white text-center">
                 <span class="text-sm text-gray-500">分</span>
               </div>
-              <button onclick="removeQuestion(${q._id})" class="text-red-400 hover:text-red-600 text-sm font-medium">删除</button>
+              <button onclick="removeQuestion(${q._id})" aria-label="删除第 ${i + 1} 题" class="text-red-400 hover:text-red-600 text-sm font-medium">删除</button>
             </div>
 
             <div>
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">题目内容 * <span class="text-xs font-normal text-gray-400">（支持 Markdown 与 KaTeX 公式，<a href="/pages/markdown-demo.html" target="_blank" rel="noopener" class="text-indigo-500 hover:underline">语法示例</a>）</span></label>
-              <textarea oninput="previewQuestion(${q._id}, this.value)" rows="3"
+              <textarea oninput="previewQuestion(${q._id}, this.value)" rows="3" aria-label="第 ${i + 1} 题的题目内容"
                 placeholder="支持 Markdown：**加粗**、\`代码\`、- 列表、\$公式\$"
                 class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white text-sm font-mono">${escapeHtml(q.title)}</textarea>
               <div class="mt-1 text-xs text-gray-400">预览：</div>
@@ -440,7 +440,7 @@
             ${q.question_type !== 'program' ? `
             <div class="mt-3">
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">${q.question_type === 'long_answer' || (q.question_type === 'fill_blank' && q.is_subjective) ? '参考答案（可选）' : '正确答案 *'}</label>
-              <input value="${escapeHtml(q.correct_answer)}" onchange="questions[${i}].correct_answer = this.value"
+              <input value="${escapeHtml(q.correct_answer)}" onchange="questions[${i}].correct_answer = this.value" aria-label="第 ${i + 1} 题的正确答案"
                 class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white text-sm"
                 placeholder="${q.question_type === 'choice' ? '输入 A/B/C/D' : q.question_type === 'true_false' ? '输入 true 或 false' : '输入答案'}">
             </div>
@@ -449,7 +449,7 @@
             ${(q.question_type === 'long_answer' || (q.question_type === 'fill_blank' && q.is_subjective)) ? `
             <div class="mt-3">
               <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">AI 评分提示词（可选）</label>
-              <textarea onchange="questions[${i}].ai_grading_prompt = this.value" rows="2"
+              <textarea onchange="questions[${i}].ai_grading_prompt = this.value" rows="2" aria-label="第 ${i + 1} 题的 AI 评分提示词"
                 class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white text-sm"
                 placeholder="留空使用默认提示词">${escapeHtml(q.ai_grading_prompt || '')}</textarea>
             </div>
@@ -536,8 +536,8 @@
       const file = input.files && input.files[0];
       input.value = '';
       if (!file) return;
-      if (!/\.zip$/i.test(file.name)) { alert('请选择 .zip 文件'); return; }
-      if (file.size > 7 * 1024 * 1024) { alert('ZIP 文件不能超过 7MB'); return; }
+      if (!/\.zip$/i.test(file.name)) { showToast('请选择 .zip 文件', 'error'); return; }
+      if (file.size > 7 * 1024 * 1024) { showToast('ZIP 文件不能超过 7MB', 'error'); return; }
       const q = questions.find(x => x._id === qid);
       if (!q || !q.program) return;
       const reader = new FileReader();
@@ -546,7 +546,7 @@
         q.program.zipName = file.name;
         renderQuestions();
       };
-      reader.onerror = () => alert('读取文件失败');
+      reader.onerror = () => showToast('读取文件失败', 'error');
       reader.readAsDataURL(file);
     }
 
@@ -563,7 +563,7 @@
       try {
         NoldExamImport.downloadTemplate();
       } catch (err) {
-        alert(err.message || '模板下载失败');
+        showToast(err.message || '模板下载失败', 'error');
       }
     }
 
@@ -576,7 +576,7 @@
       try {
         res = await NoldExamImport.importFile(file);
       } catch (err) {
-        alert('Excel 导入失败: ' + (err && err.message ? err.message : err));
+        showToast('Excel 导入失败: ' + (err && err.message ? err.message : err), 'error');
         return;
       }
 
@@ -584,7 +584,7 @@
       const notes = (res.errors || []).filter(e => e.indexOf('提示：') === 0);
 
       if (!res.questions.length) {
-        alert('没有解析出任何题目' + (errs.length ? '：\n' + errs.slice(0, 10).join('\n') + (errs.length > 10 ? `\n… 共 ${errs.length} 条` : '') : ''));
+        showToast('没有解析出任何题目' + (errs.length ? '：\n' + errs.slice(0, 10).join('\n') + (errs.length > 10 ? `\n… 共 ${errs.length} 条` : '') : ''), 'error');
         return;
       }
 
@@ -605,18 +605,18 @@
 
     async function saveExam() {
       const title = document.getElementById('f-title').value.trim();
-      if (!title) { alert('请输入试卷标题'); return; }
+      if (!title) { showToast('请输入试卷标题', 'error'); return; }
 
-      if (questions.length === 0) { alert('请至少添加一道题目'); return; }
+      if (questions.length === 0) { showToast('请至少添加一道题目', 'error'); return; }
 
       for (let vi = 0; vi < questions.length; vi++) {
         const q = questions[vi];
         if (q.question_type !== 'program') continue;
         const pg = q.program;
-        if (!pg) { alert(`第 ${vi + 1} 题：编程题配置缺失`); return; }
+        if (!pg) { showToast(`第 ${vi + 1} 题：编程题配置缺失`, 'error'); return; }
         const hasTc = pg.testcases.some(tc => (tc.input || '').length || (tc.output || '').length);
         if (!hasTc && !pg.zipBase64) {
-          alert(`第 ${vi + 1} 题：请至少填写一个测试点，或上传测试数据 ZIP`);
+          showToast(`第 ${vi + 1} 题：请至少填写一个测试点，或上传测试数据 ZIP`, 'error');
           return;
         }
         if (pg.allowed_languages.length === 0) pg.allowed_languages = langList.map(l => l.name);
@@ -684,7 +684,7 @@
         }
         window.location.href = '/pages/exams.html';
       } catch (err) {
-        alert(err.message || '保存失败');
+        showToast(err.message || '保存失败', 'error');
       }
     }
 

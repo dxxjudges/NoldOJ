@@ -1,7 +1,9 @@
 const express = require('express');
-const db = require('../database/db');
+const statisticsRepo = require('../repositories/statistics');
 const { requireAuth } = require('../middleware/auth');
 const { canViewUserData } = require('../utils/roles');
+
+const { sendNotFound } = require('../utils/apiErrors');
 
 const router = express.Router();
 
@@ -10,13 +12,7 @@ function getStatsData(uid) {
   const calStart = new Date();
   calStart.setUTCDate(calStart.getUTCDate() - 364);
   const startStr = calStart.toISOString().slice(0, 10);
-  const calRows = db.prepare(`
-    SELECT substr(created_at, 1, 10) as d,
-      COUNT(*) as submits,
-      SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) as acs
-    FROM submissions WHERE user_id = ? AND exam_id IS NULL AND created_at >= ?
-    GROUP BY substr(created_at, 1, 10)
-  `).all(uid, startStr);
+  const calRows = statisticsRepo.getCalendarRows(uid, startStr);
   const calMap = new Map(calRows.map(r => [r.d, { submits: r.submits, acs: r.acs || 0 }]));
   const calendar = [];
   for (let i = 0; i <= 364; i++) {
@@ -28,30 +24,15 @@ function getStatsData(uid) {
   }
 
   // 语言分布：按语言统计提交数与 AC 数
-  const langRows = db.prepare(`
-    SELECT language,
-      COUNT(*) as submits,
-      SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) as acs
-    FROM submissions WHERE user_id = ? AND exam_id IS NULL
-    GROUP BY language ORDER BY submits DESC
-  `).all(uid);
+  const langRows = statisticsRepo.getLanguageRows(uid);
   const languages = langRows.map(r => ({ language: r.language, submits: r.submits, acs: r.acs || 0 }));
 
   // 难度分布：AC 的题目按难度（去重）分布
-  const diffRows = db.prepare(`
-    SELECT p.difficulty, COUNT(*) as c
-    FROM (SELECT DISTINCT problem_id FROM submissions WHERE user_id = ? AND exam_id IS NULL AND status = 'accepted') ac
-    JOIN problems p ON p.id = ac.problem_id
-    GROUP BY p.difficulty ORDER BY p.difficulty
-  `).all(uid);
+  const diffRows = statisticsRepo.getDifficultyRows(uid);
   const difficulty = diffRows.map(r => ({ difficulty: r.difficulty, count: r.c }));
 
   // 概览
-  const totalAccepted = db.prepare("SELECT COUNT(*) as c FROM submissions WHERE user_id = ? AND exam_id IS NULL AND status = 'accepted'").get(uid).c;
-  const totalSubmits = db.prepare('SELECT COUNT(*) as c FROM submissions WHERE user_id = ? AND exam_id IS NULL').get(uid).c;
-  const totalProblems = db.prepare("SELECT COUNT(DISTINCT problem_id) as c FROM submissions WHERE user_id = ? AND exam_id IS NULL AND status = 'accepted'").get(uid).c;
-  const totalFavorites = db.prepare('SELECT COUNT(*) as c FROM user_favorites WHERE user_id = ?').get(uid).c;
-  const achievements = db.prepare('SELECT COUNT(*) as c FROM user_achievements WHERE user_id = ?').get(uid).c;
+  const { totalAccepted, totalSubmits, totalProblems, totalFavorites, achievements } = statisticsRepo.getOverview(uid);
 
   return {
     overview: { totalAccepted, totalSubmits, totalProblems, totalFavorites, achievements },
@@ -69,9 +50,9 @@ router.get('/me/stats', requireAuth, (req, res) => {
   if (!Number.isInteger(targetId)) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'Invalid user_id.' });
   }
-  const target = db.prepare('SELECT id, hide_dashboard FROM users WHERE id = ?').get(targetId);
+  const target = statisticsRepo.getUserDashboardPrivacy(targetId);
   if (!target) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'User not found.' });
+    return sendNotFound(res, 'User not found.');
   }
   if (!canViewUserData(req.user, target, 'hide_dashboard')) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: '该用户已对其它用户隐藏看板。' });
@@ -81,17 +62,7 @@ router.get('/me/stats', requireAuth, (req, res) => {
 
 // 提交云图：按题目统计提交次数，用于词云渲染
 router.get('/wordcloud', (req, res) => {
-  const rows = db.prepare(`
-    SELECT p.id, p.title, 
-           COUNT(s.id) as submission_count,
-           SUM(CASE WHEN s.status = 'accepted' THEN 1 ELSE 0 END) as accepted_count
-    FROM problems p
-    JOIN submissions s ON s.problem_id = p.id
-    WHERE p.is_public = 1 AND p.is_hidden = 0
-    GROUP BY p.id
-    ORDER BY submission_count DESC
-    LIMIT 200
-  `).all();
+  const rows = statisticsRepo.getWordcloud();
   res.json(rows);
 });
 

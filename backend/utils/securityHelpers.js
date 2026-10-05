@@ -42,9 +42,9 @@ function sanitizeText(value, maxLen = 100000) {
     .replace(/<iframe[\s\S]*?(?:>|<\/iframe\s*>)/gi, '[embed]')
     .replace(/<object[\s\S]*?<\/object\s*>/gi, '')
     .replace(/<embed[\s\S]*?>/gi, '')
-    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')      // onerror/onload 等事件属性
-    .replace(/\s(?:href|src)\s*=\s*("?)\s*javascript:[^"'>]*\1/gi, ' href="/"')  // javascript: 协议
-    .replace(/<img[^>]*>/gi, m => m.replace(/\s(?:onerror|onload|onclick)[^>]*/gi, '')); // img 事件残留兜底
+    .replace(/[\s/]on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, ' ')      // 事件属性；允许 / 分隔以拦截 <svg/onload=...>（HTML 在标签名后把 / 当空白，旧 \s 版本被绕过）
+    .replace(/[\s/](?:href|src)\s*=\s*("?)\s*javascript:[^"'>]*\1/gi, ' href="/"')  // javascript: 协议（含 /href= 变体）
+    .replace(/<img[^>]*>/gi, m => m.replace(/[\s/](?:onerror|onload|onclick)[^>]*/gi, ' ')); // img 事件残留兜底
 }
 
 module.exports = { sanitizeLog, hmacDigest, banUserAndRevoke, sanitizeText };

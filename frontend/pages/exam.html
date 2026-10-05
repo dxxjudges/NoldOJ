@@ -14,15 +14,15 @@
   <script src="/js/api.js"></script>
   <script src="/js/purify.min.js"></script>
   <script src="/js/markdown.js"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/selection/active-line.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" integrity="sha384-zaeBlB/vwYsDRSlFajnDd7OydJ0cWk+c2OWybl3eSUf6hW2EbhlCsQPqKr3gkznT" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css" integrity="sha384-ccdJwIIg/K0Ab6aXF4MPACh7ckk61tvQFTrfkhXZEALgAETURNZIAuQLcS/aPbrM" crossorigin="anonymous">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js" integrity="sha384-ZYmwuq4n2gOcNxMSiJ6jyTj+BbIrilr7p6dlq6q5nmSWKmsH9UU4K1qqjycMkfmR" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js" integrity="sha384-o9m634t2Hy35pPNKd9Xe16ntbSw11jCOuKPDrzQGXI8k87L2JZthaA3rwmJjnF7Z" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js" integrity="sha384-Xy+2exU6lBoT4OpUOtnQb+cUpn+nlJQEHvRobWVtwz6wIsw4oNoO7xyd/l8rYgMy" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js" integrity="sha384-g0o+WW9mdIxA7LaaCKTkRm0M5TVT+Bb4s9eocxPsI2G0Xm0POG9iD6G6qP1IIsfS" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js" integrity="sha384-LjCI3E8qhhxXZvu7+FCvqx9eZYSowFvuJ7z54KsgI/BDPGKEuysqCg/vYiKHvC4Y" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js" integrity="sha384-69mJoUoPPF/C7qPs6lLjvXvrt6w225+rmxWqGO3a1glVjITdnnwPQOtG9FRTd2Ni" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/selection/active-line.min.js" integrity="sha384-hcxaXyAtJ30s2NeDu1OHWsQRiHiWuYLTbI596+YFb+f2pFhzO0mDuahZziRPPDxg" crossorigin="anonymous"></script>
   <style>
     #editorContainer, .prog-editor { width: 100%; height: 260px; border-radius: 0.75rem; border: 1px solid #e5e7eb; text-align: left; }
     .dark .prog-editor { border-color: #374151; }
@@ -39,7 +39,7 @@
 <body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
   <div id="nav"></div>
   <div class="max-w-4xl mx-auto px-4 py-8">
-    <div id="content" class="text-center py-12 text-gray-400">加载中...</div>
+    <div id="content" aria-live="polite" class="text-center py-12 text-gray-400">加载中...</div>
   </div>
   <script>
     document.getElementById('nav').innerHTML = renderNav('exams');
@@ -175,13 +175,13 @@
           `;
         } else if (q.question_type === 'fill_blank') {
           html += `
-            <input type="text" id="ans-${q.id}" placeholder="请输入答案"
+            <input type="text" id="ans-${q.id}" aria-label="第 ${i + 1} 题的填空答案" placeholder="请输入答案"
               class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none dark:bg-gray-700 dark:text-white"
               oninput="setAnswer(${q.id}, this.value)">
           `;
         } else if (q.question_type === 'long_answer') {
           html += `
-            <textarea id="ans-${q.id}" placeholder="请输入你的回答..." rows="6"
+            <textarea id="ans-${q.id}" aria-label="第 ${i + 1} 题的回答" placeholder="请输入你的回答..." rows="6"
               class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none dark:bg-gray-700 dark:text-white resize-y"
               oninput="setAnswer(${q.id}, this.value)"></textarea>
           `;
@@ -202,7 +202,7 @@
               <div class="text-xs text-gray-400 not-prose mt-3">⏱️ 时限 ${pg.time_limit || 1000} ms · 🧠 内存 ${pg.memory_limit || 256} MB</div>
             </div>
             <div class="flex flex-wrap items-center gap-3 mb-3">
-              <select id="lang-${q.id}" class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white text-sm" onchange="onProgramLangChange(${q.id})">
+              <select id="lang-${q.id}" aria-label="第 ${i + 1} 题的编程语言" class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white text-sm" onchange="onProgramLangChange(${q.id})">
                 ${langOptions}
               </select>
               <span id="pstat-${q.id}" class="text-sm">${mySub ? statusBadge(mySub.status) : '<span class="text-gray-400">未提交</span>'}</span>
@@ -249,7 +249,7 @@
         }
         updateTimer();
         const onExpire = () => {
-          alert('时间到！自动提交试卷。');
+          showToast('时间到！自动提交试卷。', 'info');
           submitExam();
         };
         if (timeLeft <= 0) {
@@ -333,7 +333,7 @@
       const sel = document.getElementById('lang-' + qid);
       const ed = programEditors[qid];
       const code = ed ? ed.getValue() : '';
-      if (!code.trim()) { alert('请输入代码'); return; }
+      if (!code.trim()) { showToast('请输入代码', 'error'); return; }
 
       const btn = document.getElementById('psubmit-' + qid);
       if (btn) { btn.disabled = true; btn.style.opacity = '.5'; btn.textContent = '提交中...'; }
@@ -350,7 +350,7 @@
         if (btn) { btn.disabled = true; btn.style.opacity = '.5'; btn.textContent = '已提交'; }
         pollProgramSubmission(qid, data.submission_id);
       } catch (err) {
-        alert(err.message || '提交失败');
+        showToast(err.message || '提交失败', 'error');
         if (btn) { btn.disabled = false; btn.style.opacity = '1'; btn.textContent = '提交代码'; }
       }
     }
@@ -399,13 +399,13 @@
         let tail = '';
         if (result.has_pending_program) tail = '\n⏳ 编程题评测中，稍后刷新查看成绩';
         else if (result.has_subjective) tail = '\n含有主观题，等待批改...';
-        alert(`提交成功！\n得分: ${result.total_score} / ${result.max_score}${tail}`);
-        window.location.reload();
+        showToast(`提交成功！\n得分: ${result.total_score} / ${result.max_score}${tail}`, 'success');
+        setTimeout(() => { window.location.reload(); }, 900);
       } catch (err) {
-        alert(err.message || '提交失败');
+        showToast(err.message || '提交失败', 'error');
         // 考试窗口已结束：不再重启计时器，刷新进入只读态
         if (currentExam && currentExam.end_time && Date.now() > Date.parse(currentExam.end_time)) {
-          window.location.reload();
+          setTimeout(() => { window.location.reload(); }, 900);
           return;
         }
         if (timer) {

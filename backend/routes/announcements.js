@@ -1,11 +1,13 @@
 const express = require('express');
-const db = require('../database/db');
+const announcementsRepo = require('../repositories/announcements');
 const { requireAuth, requireRole, optionalAuth } = require('../middleware/auth');
 const { emitAnnouncement } = require('../services/socket');
 const { parsePageLimit } = require('../utils/pagination');
 const { isAdminOrSu } = require('../utils/roles');
 const { buildUpdates } = require('../utils/db');
 const { sanitizeText } = require('../utils/securityHelpers');
+
+const { sendNotFound } = require('../utils/apiErrors');
 
 const router = express.Router();
 
@@ -18,32 +20,23 @@ router.get('/', (req, res) => {
   // 比赛公告由专用接口返回，此处仅返回全局公告
   const params = [type === 'contest' ? 'global' : type];
 
-  const total = db.prepare(`SELECT COUNT(*) as c FROM announcements a ${where}`).get(...params).c;
-  const items = db.prepare(`
-    SELECT a.id, a.title, a.type, a.contest_id, a.pinned, a.author_id, a.created_at, a.updated_at,
-           u.username, u.nickname
-    FROM announcements a LEFT JOIN users u ON a.author_id = u.id
-    ${where} ORDER BY a.pinned DESC, a.id DESC LIMIT ? OFFSET ?
-  `).all(...params, sizeNum, offset);
+  const total = announcementsRepo.countList(where, params);
+  const items = announcementsRepo.list(where, params, sizeNum, offset);
 
   res.json({ total, page: pageNum, size: sizeNum, announcements: items });
 });
 
 // 详情
 router.get('/:id', optionalAuth, (req, res) => {
-  const a = db.prepare(`
-    SELECT a.*, u.username, u.nickname
-    FROM announcements a LEFT JOIN users u ON a.author_id = u.id
-    WHERE a.id = ?
-  `).get(req.params.id);
+  const a = announcementsRepo.getWithAuthor(req.params.id);
   if (!a) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Announcement not found.' });
+    return sendNotFound(res, 'Announcement not found.');
   }
   // 10.3: 隐藏比赛的公告仅 staff 可见
   if (a.type === 'contest' && a.contest_id) {
-    const contest = db.prepare('SELECT is_hidden FROM contests WHERE id = ?').get(a.contest_id);
+    const contest = announcementsRepo.getContestHidden(a.contest_id);
     if (contest && contest.is_hidden && (!req.user || !['admin', 'su', 'teacher'].includes(req.user.role))) {
-      return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Announcement not found.' });
+      return sendNotFound(res, 'Announcement not found.');
     }
   }
   res.json(a);
@@ -62,13 +55,13 @@ router.post('/', requireAuth, requireRole('teacher'), (req, res) => {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'contest_id is required for contest announcements.' });
   }
   // D-L9: 校验比赛存在，避免悬挂公告
-  if (type === 'contest' && !db.prepare('SELECT id FROM contests WHERE id = ?').get(contest_id)) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Contest not found.' });
+  if (type === 'contest' && !announcementsRepo.findContest(contest_id)) {
+    return sendNotFound(res, 'Contest not found.');
   }
-  const result = db.prepare(
-    'INSERT INTO announcements (title, content, type, contest_id, pinned, author_id) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(sanitizeText(title).trim(), sanitizeText(content).trim(), type, type === 'contest' ? contest_id : null, pinned ? 1 : 0, req.user.id);
-  const ann = db.prepare('SELECT * FROM announcements WHERE id = ?').get(result.lastInsertRowid);
+  const result = announcementsRepo.insert(
+    sanitizeText(title).trim(), sanitizeText(content).trim(), type, type === 'contest' ? contest_id : null, pinned ? 1 : 0, req.user.id
+  );
+  const ann = announcementsRepo.get(result.lastInsertRowid);
   // 广播新公告给所有在线用户
   if (ann.type === 'global') {
     emitAnnouncement(ann);
@@ -78,9 +71,9 @@ router.post('/', requireAuth, requireRole('teacher'), (req, res) => {
 
 // 更新（作者或 admin）
 router.put('/:id', requireAuth, requireRole('teacher'), (req, res) => {
-  const ann = db.prepare('SELECT * FROM announcements WHERE id = ?').get(req.params.id);
+  const ann = announcementsRepo.get(req.params.id);
   if (!ann) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Announcement not found.' });
+    return sendNotFound(res, 'Announcement not found.');
   }
   if (req.user.id !== ann.author_id && !isAdminOrSu(req.user.role)) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Cannot edit others\' announcements.' });
@@ -94,8 +87,8 @@ router.put('/:id', requireAuth, requireRole('teacher'), (req, res) => {
     if (!contest_id) {
       return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'contest_id is required for contest announcements.' });
     }
-    if (!db.prepare('SELECT id FROM contests WHERE id = ?').get(contest_id)) {
-      return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Contest not found.' });
+    if (!announcementsRepo.findContest(contest_id)) {
+      return sendNotFound(res, 'Contest not found.');
     }
   }
   const u = buildUpdates([
@@ -111,21 +104,21 @@ router.put('/:id', requireAuth, requireRole('teacher'), (req, res) => {
   if (u.set.length === 0) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'No fields to update.' });
   }
-  db.prepare(`UPDATE announcements SET ${u.set.join(', ')} WHERE id = ?`).run(...u.values, ann.id);
-  const updated = db.prepare('SELECT * FROM announcements WHERE id = ?').get(ann.id);
+  announcementsRepo.update(ann.id, u);
+  const updated = announcementsRepo.get(ann.id);
   res.json(updated);
 });
 
 // 删除（作者或 admin）
 router.delete('/:id', requireAuth, requireRole('teacher'), (req, res) => {
-  const ann = db.prepare('SELECT * FROM announcements WHERE id = ?').get(req.params.id);
+  const ann = announcementsRepo.get(req.params.id);
   if (!ann) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Announcement not found.' });
+    return sendNotFound(res, 'Announcement not found.');
   }
   if (req.user.id !== ann.author_id && !isAdminOrSu(req.user.role)) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Cannot delete others\' announcements.' });
   }
-  db.prepare('DELETE FROM announcements WHERE id = ?').run(ann.id);
+  announcementsRepo.remove(ann.id);
   res.json({ message: 'Announcement deleted.' });
 });
 

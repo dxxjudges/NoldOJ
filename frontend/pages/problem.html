@@ -27,7 +27,7 @@
 <body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
   <div id="nav"></div>
   <div class="max-w-7xl mx-auto px-4 py-6">
-    <div id="content" class="text-center py-12 text-gray-400 dark:text-gray-500">加载中...</div>
+    <div id="content" aria-live="polite" class="text-center py-12 text-gray-400 dark:text-gray-500">加载中...</div>
   </div>
   <script>
     document.getElementById('nav').innerHTML = renderNav('problems');
@@ -351,7 +351,7 @@
         btn.classList.toggle('text-yellow-700', favorited);
         btn.classList.toggle('dark:bg-yellow-900/30', favorited);
         btn.classList.toggle('dark:text-yellow-300', favorited);
-      } catch (err) { alert(err.message || '操作失败'); }
+      } catch (err) { showToast(err.message || '操作失败', 'error'); }
     }
 
     async function getAiHint(btn) {
@@ -363,11 +363,11 @@
         const d = await apiCall('POST', `/problems/${pid}/hint`, {});
         btn.innerHTML = orig;
         btn.disabled = false;
-        alert(`💡 AI 思路提示：\n\n${d.hint}`);
+        showToast(`💡 AI 思路提示：\n\n${d.hint}`, 'info');
       } catch (err) {
         btn.innerHTML = orig;
         btn.disabled = false;
-        alert(err.message || '获取提示失败');
+        showToast(err.message || '获取提示失败', 'error');
       }
     }
 

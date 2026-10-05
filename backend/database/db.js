@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const config = require('../config/config');
+const { logInfo } = require('../utils/logger');
 
 let sqlDb = null;
 
@@ -57,7 +58,7 @@ function exec(sql) {
 // 关闭数据库连接（进程退出时调用，确保 WAL 数据落盘）
 function closeDB() {
   if (sqlDb) {
-    try { sqlDb.close(); } catch {}
+    try { sqlDb.close(); } catch { /* 退出路径上的关闭失败不再处理，WAL 已由 SQLite 兜底 */ }
     sqlDb = null;
   }
 }
@@ -95,7 +96,7 @@ function repairDanglingSubmissionsOldRefs() {
       const cols = tableCols(backup);
       sqlDb.exec(`INSERT INTO ${name} (${cols.join(',')}) SELECT ${cols.join(',')} FROM ${backup}`);
       sqlDb.exec(`DROP TABLE ${backup}`);
-      console.log(`[DB] repaired dangling FK in ${name}: submissions_old -> submissions`);
+      logInfo('DB', `repaired dangling FK in ${name}: submissions_old -> submissions`);
     }
   } finally {
     sqlDb.exec('PRAGMA foreign_keys = ON');
@@ -180,7 +181,7 @@ async function initDB() {
       sqlDb.exec("CREATE INDEX IF NOT EXISTS idx_submissions_user ON submissions(user_id)");
       sqlDb.exec("CREATE INDEX IF NOT EXISTS idx_submissions_problem ON submissions(problem_id)");
       sqlDb.exec("CREATE INDEX IF NOT EXISTS idx_submissions_status ON submissions(status)");
-      console.log('[DB] submissions table CHECK constraint updated with pending_review');
+      logInfo('DB', 'submissions table CHECK constraint updated with pending_review');
     } finally {
       sqlDb.exec('PRAGMA foreign_keys = ON');
     }
@@ -235,7 +236,7 @@ async function initDB() {
       sqlDb.exec(`INSERT INTO exam_questions_migrate (${eqPick.join(',')}) SELECT ${eqPick.join(',')} FROM exam_questions`);
       sqlDb.exec('DROP TABLE exam_questions');
       sqlDb.exec('ALTER TABLE exam_questions_migrate RENAME TO exam_questions');
-      console.log("[DB] exam_questions table rebuilt with 'program' type + problem_id");
+      logInfo('DB', "exam_questions table rebuilt with 'program' type + problem_id");
     } finally {
       sqlDb.exec('PRAGMA foreign_keys = ON');
     }
@@ -575,9 +576,9 @@ async function initDB() {
     sqlDb.prepare('INSERT INTO users (username, password_hash, nickname, role) VALUES (?, ?, ?, ?)').run('admin', hash, 'Super Admin', 'su');
     // 仅在数据库刚初始化、且此前不存在 admin 时输出；环境变量指定的口令不回显
     if (envPw && envPw.length > 0) {
-      console.log('[DB] 初始管理员账号 admin 已创建，初始密码由环境变量 NoldOJ_INIT_ADMIN_PASSWORD 指定（不回显）');
+      logInfo('DB', '初始管理员账号 admin 已创建，初始密码由环境变量 NoldOJ_INIT_ADMIN_PASSWORD 指定（不回显）');
     } else {
-      console.log('[DB] 初始管理员账号 admin 已创建，初始密码（仅此一次显示）: ' + initialPw);
+      logInfo('DB', '初始管理员账号 admin 已创建，初始密码（仅此一次显示）: ' + initialPw);
     }
   }
 

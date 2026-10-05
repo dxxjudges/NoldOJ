@@ -1,4 +1,5 @@
 const db = require('../database/db');
+const { logWarn } = require('../utils/logger');
 
 // 成就检查：在每次评测结束（无论是否 AC）后调用，按需解锁并返回新增成就列表。
 // 为控制开销，仅当提交为 accepted 或提交数达阈值时才跑较重统计。
@@ -16,7 +17,10 @@ function checkAchievements(userId, problemId, language, createdAt) {
         db.prepare('INSERT OR IGNORE INTO user_achievements (user_id, achievement_id) VALUES (?, ?)').run(userId, a.id);
         unlocked.add(a.id);
         added.push(a);
-      } catch {}
+      } catch (e) {
+        // 解锁写库失败会让用户永久丢成就，不能静默
+        logWarn('ACHIEVEMENTS', `unlock failed user=${userId} code=${code}: ${e && e.message}`);
+      }
     }
   }
 

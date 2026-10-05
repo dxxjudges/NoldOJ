@@ -11,6 +11,7 @@
 // 7. 不要搞 AST，token + Jaccard 够用
 
 const db = require('../database/db');
+const { logInfo, logError } = require('../utils/logger');
 
 // 阈值常量
 const HIGH_THRESHOLD = 0.85;
@@ -141,9 +142,9 @@ async function runTask(taskId, problemId) {
     }
     db.prepare("UPDATE plagiarism_tasks SET status = 'done', checked_pairs = ?, finished_at = datetime('now') WHERE id = ?")
       .run(checked, taskId);
-    console.log(`[Plagiarism] Task #${taskId} done. submissions=${valid.length}, pairs_checked=${checked}, found=${found}`);
+    logInfo('Plagiarism', `Task #${taskId} done. submissions=${valid.length}, pairs_checked=${checked}, found=${found}`);
   } catch (err) {
-    console.error(`[Plagiarism] Task #${taskId} failed:`, err.message);
+    logError('Plagiarism', `Task #${taskId} failed:`, err.message);
     db.prepare("UPDATE plagiarism_tasks SET status = 'failed', finished_at = datetime('now') WHERE id = ?").run(taskId);
   }
 }

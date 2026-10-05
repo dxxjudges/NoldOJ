@@ -1,5 +1,7 @@
 const { describe, it, before } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 require('./_testdb')('sandbox');
 const db = require('../database/db');
 const sandbox = require('../sandbox/executor');
@@ -9,11 +11,20 @@ const { spawnSync } = require('node:child_process');
 const gpp = spawnSync('g++', ['--version'], { shell: process.platform === 'win32', stdio: 'ignore' });
 const SKIP_NO_GPP = gpp.status === 0 ? false : '未检测到 g++，跳过真实编译测试';
 
+// Windows 默认 fail-closed：缺 sandbox_runner.exe 时 runCode 直接拒绝（不再裸跑），
+// 本地开发未编译 exe 时本套用例应跳过并提示先跑 sandbox\build.bat，而不是误报失败。
+// CI windows-latest job 会在 npm test 前编译 exe，确保真实沙箱路径被覆盖。
+const RUNNER_EXE = path.join(__dirname, '..', 'sandbox', 'sandbox_runner.exe');
+const SKIP_NO_RUNNER = process.platform === 'win32' && !fs.existsSync(RUNNER_EXE)
+  ? '未检测到 sandbox_runner.exe（Windows fail-closed），先运行 sandbox\\build.bat'
+  : false;
+const SKIP = SKIP_NO_GPP || SKIP_NO_RUNNER;
+
 describe('C++ Sandbox & Executor Real Execution', () => {
   before(async () => {
     await db.initDB();
   });
-  it('正确执行简单 C++ 程序并捕获标准输出与内存', { skip: SKIP_NO_GPP }, async () => {
+  it('正确执行简单 C++ 程序并捕获标准输出与内存', { skip: SKIP }, async () => {
     const code = `
       #include <iostream>
       using namespace std;
@@ -41,7 +52,7 @@ describe('C++ Sandbox & Executor Real Execution', () => {
     }
   });
 
-  it('超时死循环程序能被沙箱严格限制并中断 (TLE 拦截)', { skip: SKIP_NO_GPP }, async () => {
+  it('超时死循环程序能被沙箱严格限制并中断 (TLE 拦截)', { skip: SKIP }, async () => {
     const loopCode = `
       #include <iostream>
       using namespace std;
@@ -69,7 +80,7 @@ describe('C++ Sandbox & Executor Real Execution', () => {
     }
   });
 
-  it('语法错误代码编译失败并返回错误诊断', { skip: SKIP_NO_GPP }, () => {
+  it('语法错误代码编译失败并返回错误诊断', { skip: SKIP }, () => {
     const badCode = `
       #include <iostream>
       int main() {

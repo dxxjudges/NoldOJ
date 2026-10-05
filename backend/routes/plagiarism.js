@@ -6,6 +6,8 @@ const express = require('express');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { getTask, getPairDetail } = require('../services/plagiarism');
 
+const { sendNotFound } = require('../utils/apiErrors');
+
 const router = express.Router();
 
 // 查询单对详情：并排代码 + 共享 token 集合（前端高亮）
@@ -13,7 +15,7 @@ const router = express.Router();
 router.get('/pairs/:pair_id', requireAuth, requireRole('teacher'), (req, res) => {
   const pair = getPairDetail(parseInt(req.params.pair_id));
   if (!pair) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Plagiarism pair not found.' });
+    return sendNotFound(res, 'Plagiarism pair not found.');
   }
   res.json(pair);
 });
@@ -22,7 +24,7 @@ router.get('/pairs/:pair_id', requireAuth, requireRole('teacher'), (req, res) =>
 router.get('/:task_id', requireAuth, requireRole('teacher'), (req, res) => {
   const task = getTask(parseInt(req.params.task_id));
   if (!task) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Plagiarism task not found.' });
+    return sendNotFound(res, 'Plagiarism task not found.');
   }
   res.json(task);
 });

@@ -15,19 +15,19 @@
     <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">文件上传 / 图床</h1>
     <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm dark:shadow-gray-900/30 border border-gray-100 dark:border-gray-700 p-6 mb-6">
       <p class="text-sm text-gray-500 dark:text-gray-400 dark:text-gray-500 mb-4">上传图片或文件，获取 URL 用于在 Markdown 中引用。支持格式：jpg/png/gif/webp/svg/pdf/zip/txt/md 等。单文件默认最大 10MB，总存储默认 2GB（管理员可调整）。</p>
-      <div id="dropZone" class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-gray-700 transition" onclick="document.getElementById('fileInput').click()">
+      <div id="dropZone" role="button" tabindex="0" aria-label="点击或拖拽文件到此处上传" class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-12 text-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-gray-700 transition" onclick="document.getElementById('fileInput').click()">
         <svg class="w-12 h-12 text-gray-400 dark:text-gray-500 dark:text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
         <p class="text-gray-500 dark:text-gray-400 dark:text-gray-500">点击或拖拽文件到此处上传</p>
-        <input id="fileInput" type="file" class="hidden" onchange="uploadFile(this.files[0])">
+        <input id="fileInput" type="file" aria-label="选择要上传的文件" class="hidden" onchange="uploadFile(this.files[0])">
       </div>
       <div id="uploadProgress" class="hidden mt-4">
         <div class="w-full bg-gray-200 rounded-full h-2"><div id="progressBar" class="bg-indigo-600 h-2 rounded-full transition-all" style="width:0%"></div></div>
-        <p class="text-sm text-gray-500 dark:text-gray-400 dark:text-gray-500 mt-2" id="progressText">上传中...</p>
+        <p role="status" aria-live="polite" class="text-sm text-gray-500 dark:text-gray-400 dark:text-gray-500 mt-2" id="progressText">上传中...</p>
       </div>
       <div id="uploadResult" class="hidden mt-4 p-4 bg-green-50 dark:bg-green-900/30 rounded-xl">
         <p class="text-sm text-green-700 dark:text-green-300 font-medium mb-2">上传成功！</p>
         <div class="flex items-center space-x-2">
-          <input id="fileUrl" readonly class="flex-1 px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-mono">
+          <input id="fileUrl" aria-label="文件访问地址" readonly class="flex-1 px-3 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-mono">
           <button onclick="copyUrl()" class="px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">复制</button>
         </div>
         <p class="text-xs text-gray-400 dark:text-gray-500 dark:text-gray-400 mt-2">Markdown 中使用: ![](URL) 或 [链接文本](URL)</p>
@@ -45,7 +45,7 @@
 
     <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm dark:shadow-gray-900/30 border border-gray-100 dark:border-gray-700 p-6">
       <h3 class="font-semibold text-gray-900 dark:text-white mb-3">我的文件</h3>
-      <div id="myFiles" class="space-y-2"></div>
+      <div id="myFiles" aria-live="polite" class="space-y-2"></div>
     </div>
   </div>
   <script>
@@ -63,7 +63,7 @@
     async function uploadFile(file) {
       if (!file) return;
       const user = getUser();
-      if (!user) { alert('请先登录'); return; }
+      if (!user) { showToast('请先登录', 'error'); return; }
       document.getElementById('uploadProgress').classList.remove('hidden');
       document.getElementById('uploadResult').classList.add('hidden');
       document.getElementById('progressText').textContent = `上传中... ${file.name}`;
@@ -97,7 +97,7 @@
 
     function copyUrl() {
       const url = document.getElementById('fileUrl').value;
-      navigator.clipboard.writeText(url).then(() => alert('已复制到剪贴板'));
+      navigator.clipboard.writeText(url).then(() => showToast('已复制到剪贴板', 'success'));
     }
 
     async function loadMyFiles() {
@@ -118,7 +118,7 @@
         `).join('');
         // 10.3: 不用内联 onclick 拼接用户数据，改 data-url + 事件委托
         el.querySelectorAll('.copy-file-url').forEach(btn => {
-          btn.onclick = () => { navigator.clipboard.writeText(btn.dataset.url).then(() => alert('已复制')); };
+          btn.onclick = () => { navigator.clipboard.writeText(btn.dataset.url).then(() => showToast('已复制', 'success')); };
         });
       } catch {}
     }

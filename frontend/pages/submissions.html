@@ -19,7 +19,7 @@
       <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
         <!-- 结果筛选 -->
         <div>
-          <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">结果</label>
+          <label for="fStatus" class="block text-xs text-gray-500 dark:text-gray-400 mb-1">结果</label>
           <select id="fStatus" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white">
             <option value="">全部</option>
             <option value="accepted">通过</option>
@@ -39,21 +39,21 @@
         </div>
         <!-- 分数段 -->
         <div>
-          <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">最低分</label>
+          <label for="fScoreMin" class="block text-xs text-gray-500 dark:text-gray-400 mb-1">最低分</label>
           <input id="fScoreMin" type="number" min="0" max="100" placeholder="0" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white">
         </div>
         <div>
-          <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">最高分</label>
+          <label for="fScoreMax" class="block text-xs text-gray-500 dark:text-gray-400 mb-1">最高分</label>
           <input id="fScoreMax" type="number" min="0" max="100" placeholder="100" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white">
         </div>
         <!-- 用户筛选（仅管理员/教师可见） -->
         <div id="fUserWrap" class="hidden">
-          <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">用户名</label>
+          <label for="fUsername" class="block text-xs text-gray-500 dark:text-gray-400 mb-1">用户名</label>
           <input id="fUsername" type="text" placeholder="搜索用户名" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white">
         </div>
         <!-- 题目筛选 -->
         <div>
-          <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">题目ID</label>
+          <label for="fProblemId" class="block text-xs text-gray-500 dark:text-gray-400 mb-1">题目ID</label>
           <input id="fProblemId" type="number" min="1" placeholder="题目编号" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white">
         </div>
         <!-- 操作按钮 -->
@@ -79,7 +79,7 @@
             <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 dark:text-gray-400 dark:text-gray-500 uppercase">操作</th>
           </tr>
         </thead>
-        <tbody id="subList" class="divide-y divide-gray-100 dark:divide-gray-700"></tbody>
+        <tbody id="subList" aria-live="polite" class="divide-y divide-gray-100 dark:divide-gray-700"></tbody>
       </table>
       <div id="empty" class="hidden text-center py-12 text-gray-400 dark:text-gray-500 dark:text-gray-400">暂无提交记录</div>
     </div>
@@ -188,7 +188,7 @@
       try {
         await apiCall('DELETE', `/submissions/${id}`);
         loadSubmissions();
-      } catch (err) { alert(err.message); }
+      } catch (err) { showToast(err.message, 'error'); }
     }
 
     // 回车键触发筛选

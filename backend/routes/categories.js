@@ -1,23 +1,21 @@
 const express = require('express');
-const db = require('../database/db');
+const categoriesRepo = require('../repositories/categories');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { buildUpdates } = require('../utils/db');
+
+const { sendNotFound } = require('../utils/apiErrors');
 
 const router = express.Router();
 
 router.get('/', (req, res) => {
-  const categories = db.prepare('SELECT * FROM categories ORDER BY sort_order, id').all();
-  for (const cat of categories) {
-    const count = db.prepare('SELECT COUNT(*) as c FROM problem_categories WHERE category_id = ?').get(cat.id).c;
-    cat.problem_count = count;
-  }
+  const categories = categoriesRepo.listCategoriesWithCount();
   res.json(categories);
 });
 
 router.get('/:id', (req, res) => {
-  const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id);
+  const category = categoriesRepo.getCategory(req.params.id);
   if (!category) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Category not found.' });
+    return sendNotFound(res, 'Category not found.');
   }
   res.json(category);
 });
@@ -27,21 +25,19 @@ router.post('/', requireAuth, requireRole('admin'), (req, res) => {
   if (!name) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'Name is required.' });
   }
-  const existing = db.prepare('SELECT id FROM categories WHERE name = ?').get(name);
+  const existing = categoriesRepo.findByName(name);
   if (existing) {
     return res.status(409).json({ code: 2, reason: 'ERR_CONFLICT', message: 'Category name already exists.' });
   }
-  const result = db.prepare('INSERT INTO categories (name, description, sort_order) VALUES (?, ?, ?)').run(
-    name, description || '', sort_order || 0
-  );
-  const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(result.lastInsertRowid);
+  const result = categoriesRepo.insertCategory(name, description, sort_order);
+  const category = categoriesRepo.getCategory(result.lastInsertRowid);
   res.status(201).json(category);
 });
 
 router.put('/:id', requireAuth, requireRole('admin'), (req, res) => {
-  const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id);
+  const category = categoriesRepo.getCategory(req.params.id);
   if (!category) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Category not found.' });
+    return sendNotFound(res, 'Category not found.');
   }
   const { name, description, sort_order } = req.body;
   const u = buildUpdates([
@@ -52,38 +48,38 @@ router.put('/:id', requireAuth, requireRole('admin'), (req, res) => {
   if (u.count === 0) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'No fields to update.' });
   }
-  db.prepare(`UPDATE categories SET ${u.clause} WHERE id = ?`).run(...u.values, category.id);
-  const updated = db.prepare('SELECT * FROM categories WHERE id = ?').get(category.id);
+  categoriesRepo.updateCategory(category.id, u);
+  const updated = categoriesRepo.getCategory(category.id);
   res.json(updated);
 });
 
 router.delete('/:id', requireAuth, requireRole('admin'), (req, res) => {
-  const category = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id);
+  const category = categoriesRepo.getCategory(req.params.id);
   if (!category) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Category not found.' });
+    return sendNotFound(res, 'Category not found.');
   }
-  db.prepare('DELETE FROM problem_categories WHERE category_id = ?').run(category.id);
-  db.prepare('DELETE FROM categories WHERE id = ?').run(category.id);
+  categoriesRepo.deleteProblemCategories(category.id);
+  categoriesRepo.deleteCategory(category.id);
   res.json({ message: 'Category deleted.' });
 });
 
 router.post('/:id/problems/:pid', requireAuth, requireRole('teacher'), (req, res) => {
   const { id: categoryId, pid: problemId } = req.params;
-  const category = db.prepare('SELECT id FROM categories WHERE id = ?').get(categoryId);
+  const category = categoriesRepo.findCategory(categoryId);
   if (!category) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Category not found.' });
+    return sendNotFound(res, 'Category not found.');
   }
-  const problem = db.prepare('SELECT id FROM problems WHERE id = ?').get(problemId);
+  const problem = categoriesRepo.findProblem(problemId);
   if (!problem) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Problem not found.' });
+    return sendNotFound(res, 'Problem not found.');
   }
-  db.prepare('INSERT OR IGNORE INTO problem_categories (problem_id, category_id) VALUES (?, ?)').run(problemId, categoryId);
+  categoriesRepo.addProblem(problemId, categoryId);
   res.json({ message: 'Problem added to category.' });
 });
 
 router.delete('/:id/problems/:pid', requireAuth, requireRole('teacher'), (req, res) => {
   const { id: categoryId, pid: problemId } = req.params;
-  db.prepare('DELETE FROM problem_categories WHERE problem_id = ? AND category_id = ?').run(problemId, categoryId);
+  categoriesRepo.removeProblem(problemId, categoryId);
   res.json({ message: 'Problem removed from category.' });
 });
 

@@ -1,7 +1,7 @@
 const express = require('express');
 const os = require('os');
 const fs = require('fs');
-const db = require('../database/db');
+const statusRepo = require('../repositories/status');
 const config = require('../config/config');
 const { requireAuth } = require('../middleware/auth');
 
@@ -23,30 +23,13 @@ router.get('/status', requireAuth, (req, res) => {
     try { return fs.statSync(config.database.path).size; } catch { return 0; }
   })();
 
-  const counts = {
-    users: db.prepare('SELECT COUNT(*) as c FROM users').get().c,
-    problems: db.prepare('SELECT COUNT(*) as c FROM problems').get().c,
-    submissions: db.prepare('SELECT COUNT(*) as c FROM submissions WHERE exam_id IS NULL').get().c,
-    testCases: db.prepare('SELECT COUNT(*) as c FROM test_cases').get().c,
-    // 安全审核队列不滤试卷提交：漏审比多审代价高
-    pendingReview: db.prepare("SELECT COUNT(*) as c FROM submissions WHERE status = 'pending_review'").get().c
-  };
+  const counts = statusRepo.getSystemCounts();
 
   // 判题队列：最近处理中的提交
-  const queue = db.prepare(`
-    SELECT id, user_id, problem_id, language, status, created_at
-    FROM submissions
-    WHERE status IN ('pending','running','compiling','judging','pending_rejudge')
-    ORDER BY id DESC LIMIT 20
-  `).all();
+  const queue = statusRepo.getJudgeQueue();
 
   const today = new Date().toISOString().slice(0, 10);
-  const todayStats = db.prepare(`
-    SELECT
-      (SELECT COUNT(*) FROM submissions WHERE date(created_at) = ? AND exam_id IS NULL) as today_submits,
-      (SELECT COUNT(*) FROM submissions WHERE date(created_at) = ? AND status = 'accepted' AND exam_id IS NULL) as today_ac,
-      (SELECT COUNT(*) FROM users WHERE date(created_at) = ?) as today_users
-  `).get(today, today, today);
+  const todayStats = statusRepo.getTodayStats(today);
 
   res.json({
     ok: true,

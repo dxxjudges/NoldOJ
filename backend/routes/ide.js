@@ -1,5 +1,5 @@
 const express = require('express');
-const db = require('../database/db');
+const ideRepo = require('../repositories/ide');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { createRateLimit } = require('../middleware/ratelimit');
 const config = require('../config/config');
@@ -7,13 +7,15 @@ const { reviewCode, CODE_LENGTH_LIMIT } = require('../services/security');
 const { banUserAndRevoke } = require('../utils/securityHelpers');
 const { enqueueIdeRun } = require('../services/ideJudge');
 
+const { sendNotFound } = require('../utils/apiErrors');
+
 const router = express.Router();
 const rateLimit = createRateLimit(config.rateLimit.ideRun);
 // D-M5: /ide/review 匿名可调用且无上限 → 独立 IP 限流
 const reviewRateLimit = createRateLimit({ windowMs: 60000, max: 20 });
 
 router.get('/languages', (req, res) => {
-  const languages = db.prepare('SELECT name, display_name, extension FROM languages WHERE is_enabled = 1').all();
+  const languages = ideRepo.listEnabledLanguages();
   res.json(languages);
 });
 
@@ -46,7 +48,7 @@ router.post('/run', requireAuth, rateLimit, async (req, res) => {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: `Source code too large. Maximum ${CODE_LENGTH_LIMIT} characters.` });
   }
 
-  const langCheck = db.prepare('SELECT id FROM languages WHERE name = ? AND is_enabled = 1').get(language);
+  const langCheck = ideRepo.findEnabledLanguage(language);
   if (!langCheck) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: `Language '${language}' is not available.` });
   }
@@ -66,8 +68,8 @@ router.post('/run', requireAuth, rateLimit, async (req, res) => {
     }
   }
 
-  const newId = db.prepare('INSERT INTO ide_runs (user_id, language, source_code, stdin, status) VALUES (?, ?, ?, ?, ?)').run(
-    req.user ? req.user.id : null, language, source_code, stdin || '', 'pending'
+  const newId = ideRepo.insertRun(
+    req.user ? req.user.id : null, language, source_code, stdin || ''
   ).lastInsertRowid;
 
   enqueueIdeRun(newId);
@@ -76,9 +78,9 @@ router.post('/run', requireAuth, rateLimit, async (req, res) => {
 });
 
 router.get('/run/:id', optionalAuth, (req, res) => {
-  const run = db.prepare('SELECT * FROM ide_runs WHERE id = ?').get(req.params.id);
+  const run = ideRepo.getRun(req.params.id);
   if (!run) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Run not found.' });
+    return sendNotFound(res, 'Run not found.');
   }
   // 越权防护: 未登录用户不能读取；他人运行结果不能读取（管理员除外）
   if (!req.user) {

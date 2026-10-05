@@ -7,15 +7,15 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <script src="/js/tailwind.js"></script>
   <script>tailwind.config={darkMode:'class'}</script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
-  <link id="cm-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/selection/active-line.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" integrity="sha384-zaeBlB/vwYsDRSlFajnDd7OydJ0cWk+c2OWybl3eSUf6hW2EbhlCsQPqKr3gkznT" crossorigin="anonymous">
+  <link id="cm-theme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/dracula.min.css" integrity="sha384-ccdJwIIg/K0Ab6aXF4MPACh7ckk61tvQFTrfkhXZEALgAETURNZIAuQLcS/aPbrM" crossorigin="anonymous">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js" integrity="sha384-ZYmwuq4n2gOcNxMSiJ6jyTj+BbIrilr7p6dlq6q5nmSWKmsH9UU4K1qqjycMkfmR" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js" integrity="sha384-o9m634t2Hy35pPNKd9Xe16ntbSw11jCOuKPDrzQGXI8k87L2JZthaA3rwmJjnF7Z" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js" integrity="sha384-Xy+2exU6lBoT4OpUOtnQb+cUpn+nlJQEHvRobWVtwz6wIsw4oNoO7xyd/l8rYgMy" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js" integrity="sha384-g0o+WW9mdIxA7LaaCKTkRm0M5TVT+Bb4s9eocxPsI2G0Xm0POG9iD6G6qP1IIsfS" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js" integrity="sha384-LjCI3E8qhhxXZvu7+FCvqx9eZYSowFvuJ7z54KsgI/BDPGKEuysqCg/vYiKHvC4Y" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js" integrity="sha384-69mJoUoPPF/C7qPs6lLjvXvrt6w225+rmxWqGO3a1glVjITdnnwPQOtG9FRTd2Ni" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/selection/active-line.min.js" integrity="sha384-hcxaXyAtJ30s2NeDu1OHWsQRiHiWuYLTbI596+YFb+f2pFhzO0mDuahZziRPPDxg" crossorigin="anonymous"></script>
   <script src="/js/api.js"></script>
   <style>
     #editorContainer { width: 100%; height: 500px; border-radius: 0.75rem; border: 1px solid #e5e7eb; }
@@ -32,7 +32,7 @@
       <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm dark:shadow-gray-900/30 border border-gray-100 dark:border-gray-700 p-6">
         <div class="flex items-center justify-between mb-4">
           <div class="flex items-center space-x-3">
-            <label class="text-sm font-medium text-gray-700 dark:text-gray-300">语言:</label>
+            <label for="language" class="text-sm font-medium text-gray-700 dark:text-gray-300">语言:</label>
             <select id="language" class="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none dark:text-white" onchange="changeLang()">
             </select>
           </div>
@@ -43,7 +43,7 @@
         </div>
         <div id="editorContainer"></div>
         <div class="mt-4">
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">标准输入 (stdin)</label>
+          <label for="stdinInput" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">标准输入 (stdin)</label>
           <textarea id="stdinInput" rows="6" class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl font-mono text-sm text-left focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none dark:bg-gray-800 dark:text-white" placeholder="在此输入测试数据..."></textarea>
         </div>
       </div>
@@ -56,7 +56,7 @@
             <span id="memInfo" class="ml-3"></span>
           </div>
         </div>
-        <div id="output" class="bg-gray-900 text-green-400 p-4 rounded-xl font-mono text-sm min-h-[430px] overflow-auto whitespace-pre-wrap">点击 "运行" 执行代码...</div>
+        <div id="output" role="log" aria-live="polite" aria-label="程序输出" class="bg-gray-900 text-green-400 p-4 rounded-xl font-mono text-sm min-h-[430px] overflow-auto whitespace-pre-wrap">点击 "运行" 执行代码...</div>
       </div>
     </div>
   </div>

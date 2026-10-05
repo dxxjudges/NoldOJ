@@ -1,4 +1,5 @@
 const config = require('../config/config');
+const { logError } = require('../utils/logger');
 
 const AI_ENABLED = config.ai.security.enabled;
 const AI_URL = config.ai.security.url;
@@ -110,7 +111,7 @@ async function reviewCode(sourceCode, language) {
     });
 
     if (!response.ok) {
-      console.error(`AI review error: ${response.status}`);
+      logError('SECURITY', `AI review error: ${response.status}`);
       // Fail-Closed: 审查服务异常时拒绝放行，避免攻击者通过压垮 AI 服务绕过审查
       return { safe: false, reason: `审查服务暂时不可用 (HTTP ${response.status})，请稍后重试`, threat_level: 'critical', confirmed: false };
     }
@@ -151,7 +152,7 @@ async function reviewCode(sourceCode, language) {
       confirmed: false
     };
   } catch (err) {
-    console.error('Security review error:', err.message);
+    logError('SECURITY', 'Security review error:', err.message);
     // Fail-Closed: 审查异常时拒绝执行（但不封号）
     return { safe: false, reason: '审查服务异常，拒绝执行', threat_level: 'critical', confirmed: false };
   }

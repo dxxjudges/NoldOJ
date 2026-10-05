@@ -1,5 +1,10 @@
 /**
- * 复现: 管理员重置密码后，用户无法登录的问题 (带验证码)
+ * 黑盒: 管理员重置密码后，用户能否用新密码登录（带验证码）
+ *
+ * 审计修复（CI 假绿）: 原实现步骤 3-6 只 console.log 不断言，结尾无条件
+ * process.exit(0)，登录流程坏掉时测试也永远绿。现在每步关键结果都断言，
+ * 任一失败 exit(1)。运行前置: 服务已启动 + NoldOJ_CAPTCHA_DEBUG=1（或
+ * config/captcha_answers.json 可读）。
  */
 
 const BASE = process.env.BASE || 'http://localhost:3000';
@@ -7,6 +12,16 @@ const fs = require('fs');
 const path = require('path');
 
 const ANSWERS_FILE = path.join(__dirname, '..', '..', 'config', 'captcha_answers.json');
+
+const failures = [];
+function check(cond, msg) {
+  if (cond) {
+    console.log('    \u2713 ' + msg);
+  } else {
+    console.error('    \u2717 ' + msg);
+    failures.push(msg);
+  }
+}
 
 function getCaptchaText(captchaId) {
   try {
@@ -39,62 +54,84 @@ async function getCaptcha() {
 }
 
 async function loginWithCaptcha(username, password) {
-  const captcha = await getCaptcha();
-  const res = await fetch(`${BASE}/api/v1/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      username,
-      password,
-      captcha_id: captcha.id,
-      captcha_code: captcha.code || ''
-    })
-  });
-  const data = await res.json();
-  return { res, data, captcha };
+  // 登录限流为每 IP 10 次/60s 固定窗口；前序测试（security 的限流用例）会耗尽额度，
+  // 这里对 429 等待窗口清空后重试（最多 16×5s=80s，覆盖一个完整窗口）
+  for (let attempt = 0; ; attempt++) {
+    const captcha = await getCaptcha();
+    const res = await fetch(`${BASE}/api/v1/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username,
+        password,
+        captcha_id: captcha.id,
+        captcha_code: captcha.code || ''
+      })
+    });
+    if (res.status === 429 && attempt < 16) {
+      console.log(`    登录限流 429，等待窗口清空后重试 (${attempt + 1}/16)...`);
+      await new Promise(r => setTimeout(r, 5000));
+      continue;
+    }
+    const data = await res.json();
+    return { res, data, captcha };
+  }
 }
 
 async function main() {
-  console.log('\n=== 复现: 重置密码后无法登录 (带验证码) ===\n');
+  console.log('\n=== 黑盒: 重置密码后登录流程 (带验证码) ===\n');
 
   // 1. admin 登录
   console.log('[1] admin 登录...');
   const adminLogin = await loginWithCaptcha('admin', 'admin123');
-  console.log('    captcha:', adminLogin.captcha.code);
   console.log('    状态:', adminLogin.res.status);
   if (!adminLogin.data.access_token) {
     console.error('admin 登录失败:', adminLogin.data);
+    console.error('提示: 需要服务已启动且 NoldOJ_CAPTCHA_DEBUG=1（或 NoldOJ_INIT_ADMIN_PASSWORD=admin123）');
     process.exit(1);
   }
   const token = adminLogin.data.access_token;
-  const auth = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  // server.js 的 CSRF 中间件: 带 Bearer/凭据的非 GET 请求必须携带 Origin
+  const auth = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Origin: BASE };
   console.log('    OK\n');
 
-  // 2. 创建测试用户
-  console.log('[2] 创建测试用户 testreset / Test@123...');
+  // 2. 创建测试用户 testreset / Test@123（已存在则复用，并先把口令重置回 Test@123 保证可重复运行）
+  console.log('[2] 创建/准备测试用户 testreset...');
   const createUser = await fetch(`${BASE}/api/v1/users`, {
     method: 'POST',
     headers: auth,
     body: JSON.stringify({ username: 'testreset', password: 'Test@123', nickname: 'TestReset' })
   });
-  const createData = await createUser.json();
-  console.log('    响应:', createData);
+  const createData = await createUser.json().catch(() => ({}));
   let userId = createData.user?.id;
+  let reused = false;
   if (!userId) {
     const userList = await fetch(`${BASE}/api/v1/users?search=testreset`, { headers: auth });
-    const ud = await userList.json();
+    const ud = await userList.json().catch(() => ({}));
     userId = ud.users?.find(u => u.username === 'testreset')?.id;
+    reused = !!userId;
     console.log('    用户已存在, id:', userId);
   }
-  console.log(`    用户 ID: ${userId}\n`);
+  check(!!userId, '测试用户就绪 (id=' + userId + ')');
+  if (!userId) {
+    console.log('=== 测试终止 ===\n');
+    process.exit(1);
+  }
+  if (reused) {
+    const fixRes = await fetch(`${BASE}/api/v1/users/${userId}/reset-password`, {
+      method: 'POST', headers: auth,
+      body: JSON.stringify({ new_password: 'Test@123' })
+    });
+    console.log('    预置口令重置状态:', fixRes.status);
+  }
+  console.log();
 
-  // 3. 用原始密码登录
-  console.log('[3] 用原始密码 Test@123 登录...');
+  // 3. 用原始密码登录（重置前基线）
+  console.log('[3] 用原始密码 Test@123 登录（基线）...');
   const origLogin = await loginWithCaptcha('testreset', 'Test@123');
-  console.log('    captcha:', origLogin.captcha.code);
   console.log('    状态:', origLogin.res.status);
-  console.log('    响应:', origLogin.data.message || origLogin.data);
-  console.log(origLogin.data.access_token ? '    OK\n' : '    失败!\n');
+  check(!!origLogin.data.access_token, '重置前可用原密码登录');
+  console.log();
 
   // 4. admin 重置密码
   console.log('[4] admin 重置密码为 NewPass@456...');
@@ -103,37 +140,35 @@ async function main() {
     headers: auth,
     body: JSON.stringify({ new_password: 'NewPass@456' })
   });
-  const resetData = await resetRes.json();
+  const resetData = await resetRes.json().catch(() => ({}));
   console.log('    状态:', resetRes.status, resetData);
-  console.log('    OK, 无报错\n');
+  check(resetRes.status === 200, '重置密码接口返回 200');
+  console.log();
 
-  // 5. 用新密码登录 — 关键测试
-  console.log('[5] 用新密码 NewPass@456 登录（应成功）...');
+  // 5. 用新密码登录 — 关键断言（原 bug: 重置后无法登录）
+  console.log('[5] 用新密码 NewPass@456 登录（关键）...');
   const newPwdLogin = await loginWithCaptcha('testreset', 'NewPass@456');
-  console.log('    captcha:', newPwdLogin.captcha.code);
   console.log('    状态:', newPwdLogin.res.status);
-  console.log('    响应:', newPwdLogin.data.message || newPwdLogin.data);
-  console.log(newPwdLogin.data.access_token ? '    OK, 新密码可登录\n' : '    失败! 这就是 bug!\n');
+  check(!!newPwdLogin.data.access_token, '重置后新密码可登录');
+  console.log();
 
-  // 6. 模拟前端: 错误密码登录后，验证码被消耗，再用新验证码登录
-  console.log('[6] 模拟前端流程: 错误密码 → 验证码消耗 → 新验证码 + 新密码...');
+  // 6. 模拟前端: 错误密码消耗验证码后，刷新验证码重试
+  console.log('[6] 错误密码 → 验证码消耗 → 新验证码 + 新密码重试...');
   const wrongLogin = await loginWithCaptcha('testreset', 'WrongPassword');
-  console.log('    错误密码状态:', wrongLogin.res.status, wrongLogin.data.message);
-  // 前端在错误时会刷新验证码，然后用新验证码重试
+  console.log('    错误密码状态:', wrongLogin.res.status, wrongLogin.data.message || '');
+  check(!wrongLogin.data.access_token, '错误密码被拒绝且不发 token');
   const retryLogin = await loginWithCaptcha('testreset', 'NewPass@456');
-  console.log('    重试 captcha:', retryLogin.captcha.code);
-  console.log('    重试状态:', retryLogin.res.status);
-  console.log('    重试响应:', retryLogin.data.message || retryLogin.data);
-  console.log(retryLogin.data.access_token ? '    OK, 重试成功\n' : '    失败!\n');
+  console.log('    重试状态:', retryLogin.res.status, retryLogin.data.message || '');
+  check(!!retryLogin.data.access_token, '消耗验证码后换新验证码重试成功');
+  console.log();
 
-  // 清理
-  if (userId) {
-    console.log('[清理] 删除测试用户...');
-    await fetch(`${BASE}/api/v1/users/${userId}`, { method: 'DELETE', headers: auth });
-  }
+  // 清理（尽力而为，不参与断言）
+  console.log('[清理] 删除测试用户...');
+  const del = await fetch(`${BASE}/api/v1/users/${userId}`, { method: 'DELETE', headers: auth });
+  console.log('    删除状态:', del.status);
 
-  console.log('=== 测试结束 ===\n');
-  process.exit(0);
+  console.log(`=== 结果: ${failures.length === 0 ? '全部通过' : failures.length + ' 项失败: ' + failures.join('; ')} ===\n`);
+  process.exit(failures.length ? 1 : 0);
 }
 
 main().catch(err => {

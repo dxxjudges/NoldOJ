@@ -65,16 +65,16 @@ if exist "backend\sandbox\sandbox_runner.cpp" (
         if exist "backend\sandbox\sandbox_runner.exe" (
             echo [OK] sandbox_runner.exe rebuilt
         ) else (
-            echo [!!] sandbox_runner.exe build failed - using legacy mode
+            echo [!!] sandbox_runner.exe build failed - judging will FAIL CLOSED (set NoldOJ_ALLOW_NO_SANDBOX=1 for unsafe legacy mode)
         )
     ) else (
-        echo [!!] g++ not found - sandbox_runner.exe not rebuilt, using legacy mode
+        echo [!!] g++ not found - sandbox_runner.exe not rebuilt - judging will FAIL CLOSED (set NoldOJ_ALLOW_NO_SANDBOX=1 for unsafe legacy mode)
     )
 ) else (
     if exist "backend\sandbox\sandbox_runner.exe" (
         echo [OK] sandbox_runner.exe kept
     ) else (
-        echo [!!] sandbox_runner.exe missing - using legacy mode
+        echo [!!] sandbox_runner.exe missing - judging will FAIL CLOSED (set NoldOJ_ALLOW_NO_SANDBOX=1 for unsafe legacy mode)
     )
 )
 

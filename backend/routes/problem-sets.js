@@ -1,9 +1,12 @@
 const express = require('express');
-const db = require('../database/db');
+const problemSetsRepo = require('../repositories/problem-sets');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { parsePageLimit } = require('../utils/pagination');
 const { isStaff, isAdminOrSu } = require('../utils/roles');
 const { buildUpdates } = require('../utils/db');
+
+const { sendNotFound } = require('../utils/apiErrors');
+const { logError } = require('../utils/logger');
 
 const router = express.Router();
 
@@ -25,26 +28,14 @@ router.get('/', optionalAuth, (req, res) => {
     where = 'ps.is_public = 1';
   }
 
-  const total = db.prepare(`SELECT COUNT(*) as c FROM problem_sets ps WHERE ${where}`).get(...params).c;
-  const items = db.prepare(`
-    SELECT ps.id, ps.title, ps.description, ps.creator_id, ps.is_public, ps.type, ps.created_at,
-           u.username as creator_name,
-           (SELECT COUNT(*) FROM problem_set_items WHERE set_id = ps.id) as problem_count
-    FROM problem_sets ps LEFT JOIN users u ON ps.creator_id = u.id
-    WHERE ${where}
-    ORDER BY ps.id DESC LIMIT ? OFFSET ?
-  `).all(...params, sizeNum, offset);
+  const total = problemSetsRepo.countList(where, params);
+  const items = problemSetsRepo.list(where, params, sizeNum, offset);
 
   // 若用户已登录，附带每题单进度（批量查询，避免 N+1 DoS）
   let result = items.map(it => ({ ...it, solved_count: 0 }));
   if (userId && items.length > 0) {
     const ids = items.map(it => it.id);
-    const placeholders = ids.map(() => '?').join(',');
-    const counts = db.prepare(`
-      SELECT set_id, COUNT(*) as c FROM problem_set_progress
-      WHERE user_id = ? AND set_id IN (${placeholders}) AND solved = 1
-      GROUP BY set_id
-    `).all(userId, ...ids);
+    const counts = problemSetsRepo.countSolvedBySets(userId, ids);
     const countMap = new Map(counts.map(r => [r.set_id, r.c]));
     for (const it of result) it.solved_count = countMap.get(it.id) || 0;
   }
@@ -54,38 +45,21 @@ router.get('/', optionalAuth, (req, res) => {
 
 // 我的题单（公开 + 个人私有）
 router.get('/mine', requireAuth, (req, res) => {
-  const items = db.prepare(`
-    SELECT ps.id, ps.title, ps.description, ps.creator_id, ps.is_public, ps.type, ps.created_at,
-           (SELECT COUNT(*) FROM problem_set_items WHERE set_id = ps.id) as problem_count
-    FROM problem_sets ps
-    WHERE ps.creator_id = ?
-    ORDER BY ps.id DESC
-  `).all(req.user.id);
+  const items = problemSetsRepo.listMine(req.user.id);
   res.json({ problem_sets: items });
 });
 
 // 详情（含题目列表 + 当前用户进度）
 router.get('/:id', optionalAuth, (req, res) => {
-  const ps = db.prepare(`
-    SELECT ps.*, u.username as creator_name
-    FROM problem_sets ps LEFT JOIN users u ON ps.creator_id = u.id
-    WHERE ps.id = ?
-  `).get(req.params.id);
+  const ps = problemSetsRepo.getWithCreator(req.params.id);
   if (!ps) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Problem set not found.' });
+    return sendNotFound(res, 'Problem set not found.');
   }
   if (!ps.is_public && (!req.user || !isAdminOrSu(req.user.role)) && req.user?.id !== ps.creator_id) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'This set is private.' });
   }
 
-  const problems = db.prepare(`
-    SELECT psi.sort_order, p.id, p.title, p.difficulty,
-      EXISTS(SELECT 1 FROM submissions sub WHERE sub.problem_id = p.id AND sub.user_id = ? AND sub.status = 'accepted') as user_accepted
-    FROM problem_set_items psi
-    JOIN problems p ON psi.problem_id = p.id
-    WHERE psi.set_id = ?
-    ORDER BY psi.sort_order
-  `).all(req.user ? req.user.id : 0, ps.id);
+  const problems = problemSetsRepo.listProblems(req.user ? req.user.id : 0, ps.id);
 
   let solvedCount = 0;
   const problemList = problems.map(p => {
@@ -104,17 +78,11 @@ router.get('/:id', optionalAuth, (req, res) => {
 
 // 进度查询
 router.get('/:id/progress', requireAuth, (req, res) => {
-  const ps = db.prepare('SELECT id FROM problem_sets WHERE id = ?').get(req.params.id);
+  const ps = problemSetsRepo.get(req.params.id);
   if (!ps) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Problem set not found.' });
+    return sendNotFound(res, 'Problem set not found.');
   }
-  const items = db.prepare(`
-    SELECT psi.problem_id, COALESCE(p.solved, 0) as solved, p.solved_at
-    FROM problem_set_items psi
-    LEFT JOIN problem_set_progress p ON p.set_id = psi.set_id AND p.problem_id = psi.problem_id AND p.user_id = ?
-    WHERE psi.set_id = ?
-    ORDER BY psi.sort_order
-  `).all(req.user.id, ps.id);
+  const items = problemSetsRepo.listProgress(req.user.id, ps.id);
   const solved = items.filter(i => i.solved).length;
   res.json({ total: items.length, solved, items });
 });
@@ -128,38 +96,22 @@ router.post('/', requireAuth, (req, res) => {
   const isTeacher = isStaff(req.user.role);
   if (type === 'personal') {
     // 个人题单强制私有
-    const setId = db.findNextId('problem_sets');
-    db.prepare(
-      "INSERT INTO problem_sets (id, title, description, creator_id, is_public, type) VALUES (?, ?, ?, ?, 0, 'personal')"
-    ).run(setId, title.trim(), description, req.user.id);
-    if (Array.isArray(problemIds) && problemIds.length > 0) {
-      const ins = db.prepare('INSERT OR IGNORE INTO problem_set_items (set_id, problem_id, sort_order) VALUES (?, ?, ?)');
-      problemIds.forEach((pid, idx) => ins.run(setId, pid, idx));
-    }
-    const ps = db.prepare('SELECT * FROM problem_sets WHERE id = ?').get(setId);
+    const ps = problemSetsRepo.createPersonalSet(title.trim(), description, req.user.id, problemIds);
     return res.status(201).json(ps);
   }
   // 公开题单需教师+
   if (!isTeacher) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: '公开题单需要教师或管理员权限。' });
   }
-  const setId = db.findNextId('problem_sets');
-  db.prepare(
-    "INSERT INTO problem_sets (id, title, description, creator_id, is_public, type) VALUES (?, ?, ?, ?, ?, 'public')"
-  ).run(setId, title.trim(), description, req.user.id, is_public ? 1 : 0);
-  if (Array.isArray(problemIds) && problemIds.length > 0) {
-    const ins = db.prepare('INSERT OR IGNORE INTO problem_set_items (set_id, problem_id, sort_order) VALUES (?, ?, ?)');
-    problemIds.forEach((pid, idx) => ins.run(setId, pid, idx));
-  }
-  const ps = db.prepare('SELECT * FROM problem_sets WHERE id = ?').get(setId);
+  const ps = problemSetsRepo.createPublicSet(title.trim(), description, req.user.id, is_public, problemIds);
   res.status(201).json(ps);
 });
 
 // 更新（作者或 admin；个人题单作者可为普通用户）
 router.put('/:id', requireAuth, (req, res) => {
-  const ps = db.prepare('SELECT * FROM problem_sets WHERE id = ?').get(req.params.id);
+  const ps = problemSetsRepo.getRow(req.params.id);
   if (!ps) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Problem set not found.' });
+    return sendNotFound(res, 'Problem set not found.');
   }
   if (req.user.id !== ps.creator_id && !isAdminOrSu(req.user.role)) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Cannot edit others\' problem sets.' });
@@ -177,16 +129,16 @@ router.put('/:id', requireAuth, (req, res) => {
   if (u.count === 0) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'No fields to update.' });
   }
-  db.prepare(`UPDATE problem_sets SET ${u.clause} WHERE id = ?`).run(...u.values, ps.id);
-  const updated = db.prepare('SELECT * FROM problem_sets WHERE id = ?').get(ps.id);
+  problemSetsRepo.update(ps.id, u);
+  const updated = problemSetsRepo.getRow(ps.id);
   res.json(updated);
 });
 
 // 设置题目列表（覆盖式；个人题单作者可为普通用户）
 router.put('/:id/problems', requireAuth, (req, res) => {
-  const ps = db.prepare('SELECT * FROM problem_sets WHERE id = ?').get(req.params.id);
+  const ps = problemSetsRepo.getRow(req.params.id);
   if (!ps) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Problem set not found.' });
+    return sendNotFound(res, 'Problem set not found.');
   }
   if (req.user.id !== ps.creator_id && !isAdminOrSu(req.user.role)) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Cannot modify others\' problem sets.' });
@@ -208,21 +160,15 @@ router.put('/:id/problems', requireAuth, (req, res) => {
     if (!ids.includes(n)) ids.push(n);
   }
   // 题目不存在时原先会先 DELETE 全部条目、再在 INSERT 处抛 FK 错 → 500 且题单被清空
-  const existsStmt = db.prepare('SELECT 1 FROM problems WHERE id = ?');
-  const missing = ids.filter(id => !existsStmt.get(id));
+  const missing = problemSetsRepo.findMissingProblemIds(ids);
   if (missing.length > 0) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: `Problems not found: ${missing.join(', ')}` });
   }
 
-  db.exec('BEGIN');
   try {
-    db.prepare('DELETE FROM problem_set_items WHERE set_id = ?').run(ps.id);
-    const ins = db.prepare('INSERT OR IGNORE INTO problem_set_items (set_id, problem_id, sort_order) VALUES (?, ?, ?)');
-    ids.forEach((pid, idx) => ins.run(ps.id, pid, idx));
-    db.exec('COMMIT');
+    problemSetsRepo.replaceProblems(ps.id, ids);
   } catch (e) {
-    try { db.exec('ROLLBACK'); } catch {}
-    console.error('[PROBLEM-SET] update problems failed:', e && e.message);
+    logError('PROBLEM-SET', 'update problems failed:', e && e.message);
     return res.status(500).json({ code: 1, reason: 'ERR_INTERNAL', message: 'Failed to update problem list.' });
   }
   res.json({ message: 'Problem list updated.', count: ids.length });
@@ -230,9 +176,9 @@ router.put('/:id/problems', requireAuth, (req, res) => {
 
 // 删除（作者或 admin；个人题单作者可为普通用户）
 router.delete('/:id', requireAuth, (req, res) => {
-  const ps = db.prepare('SELECT * FROM problem_sets WHERE id = ?').get(req.params.id);
+  const ps = problemSetsRepo.getRow(req.params.id);
   if (!ps) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Problem set not found.' });
+    return sendNotFound(res, 'Problem set not found.');
   }
   if (req.user.id !== ps.creator_id && !isAdminOrSu(req.user.role)) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Cannot delete others\' problem sets.' });
@@ -240,32 +186,26 @@ router.delete('/:id', requireAuth, (req, res) => {
   if (!isStaff(req.user.role) && ps.type === 'public') {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Cannot delete public problem sets.' });
   }
-  db.prepare('DELETE FROM problem_set_progress WHERE set_id = ?').run(ps.id);
-  db.prepare('DELETE FROM problem_set_items WHERE set_id = ?').run(ps.id);
-  db.prepare('DELETE FROM problem_sets WHERE id = ?').run(ps.id);
+  problemSetsRepo.deleteSet(ps.id);
   res.json({ message: 'Problem set deleted.' });
 });
 
 // 标记进度（用户 AC 后由评测系统调用，或前端手动调用）
 router.post('/:id/progress/:pid', requireAuth, (req, res) => {
-  const ps = db.prepare('SELECT id FROM problem_sets WHERE id = ?').get(req.params.id);
+  const ps = problemSetsRepo.get(req.params.id);
   if (!ps) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Problem set not found.' });
+    return sendNotFound(res, 'Problem set not found.');
   }
-  const item = db.prepare('SELECT problem_id FROM problem_set_items WHERE set_id = ? AND problem_id = ?').get(ps.id, req.params.pid);
+  const item = problemSetsRepo.getSetItem(ps.id, req.params.pid);
   if (!item) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Problem not in this set.' });
+    return sendNotFound(res, 'Problem not in this set.');
   }
   // 校验用户是否真的 AC
-  const ac = db.prepare("SELECT id FROM submissions WHERE user_id = ? AND problem_id = ? AND status = 'accepted' LIMIT 1").get(req.user.id, req.params.pid);
+  const ac = problemSetsRepo.userHasAccepted(req.user.id, req.params.pid);
   if (!ac) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'You have not solved this problem.' });
   }
-  db.prepare(`
-    INSERT INTO problem_set_progress (user_id, set_id, problem_id, solved, solved_at)
-    VALUES (?, ?, ?, 1, datetime('now'))
-    ON CONFLICT(user_id, set_id, problem_id) DO UPDATE SET solved = 1, solved_at = datetime('now')
-  `).run(req.user.id, ps.id, req.params.pid);
+  problemSetsRepo.recordProgress(req.user.id, ps.id, req.params.pid);
   res.json({ message: 'Progress recorded.' });
 });
 

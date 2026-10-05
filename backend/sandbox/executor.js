@@ -4,6 +4,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const config = require('../config/config');
 const db = require('../database/db');
+const { logInfo, logWarn } = require('../utils/logger');
 
 // ── 安全沙箱运行器 (sandbox_runner.exe) ─────────────────────
 // 提供 Job Object + 受限令牌 + 低完整性级别 + 进程树隔离
@@ -204,7 +205,9 @@ function killProc(proc, isWindows) {
     } else {
       proc.kill('SIGKILL');
     }
-  } catch {}
+  } catch {
+    // 进程可能已退出，kill 失败可忽略
+  }
 }
 
 // ── 安全沙箱模式: 使用 sandbox_runner.exe ───────────────────
@@ -230,7 +233,7 @@ function runCodeSandboxed(workDir, srcFile, exeFile, lang, stdin, timeLimitMs, m
     // Low IL，子进程可在其中创建文件），使 runner 的 fopen("w") 静默失败，
     // 从而把 TLE/MLE/RE 伪装成 AC。workDir 的父目录仍是 Medium IL，低完整性子进程写不进去。
     const metaFile = path.join(config.sandbox.tempDir, path.basename(workDir) + '.meta.json');
-    try { fs.rmSync(metaFile, { force: true }); } catch {}
+    try { fs.rmSync(metaFile, { force: true }); } catch { /* 预清理尽力而为，runner 会以 "w" 覆盖重写 */ }
     const maxProcs = config.sandbox.maxProcesses || 64;
 
     // sandbox_runner.exe [--file-io] <time_ms> <mem_mb> <max_proc> <meta_file> <exe> [args...]
@@ -299,8 +302,10 @@ function runCodeSandboxed(workDir, srcFile, exeFile, lang, stdin, timeLimitMs, m
       try {
         const metaRaw = fs.readFileSync(metaFile, 'utf8');
         meta = JSON.parse(metaRaw);
-      } catch {}
-      try { fs.rmSync(metaFile, { force: true }); } catch {}
+      } catch {
+        // 无元数据时回退 exit_code/timeUsed 兜底（下方 resolve 按 meta 是否为 null 分支）
+      }
+      try { fs.rmSync(metaFile, { force: true }); } catch { /* 元数据已读取，删除失败可忽略 */ }
 
       resolve({
         stdout,
@@ -406,7 +411,9 @@ function runCodeLegacy(workDir, srcFile, exeFile, lang, stdin, timeLimitMs, memo
               killProc(proc, isWindows);
             }
           }
-        } catch {}
+        } catch {
+          // 单次内存采样失败不影响下一轮轮询
+        }
       }, 150);
     }
 
@@ -442,14 +449,19 @@ function runCodeLegacy(workDir, srcFile, exeFile, lang, stdin, timeLimitMs, memo
 
 // ── 统一入口: 优先使用安全沙箱 ─────────────────────────────
 // 传统模式以服务用户完整权限裸跑用户代码，无 Job/受限令牌/网络隔离。
-// 默认保持回退兼容；显式设置 NoldOJ_REQUIRE_RUNNER=1 时缺 runner 即 fail-closed 拒绝判题。
-const requireRunner = process.env.NoldOJ_REQUIRE_RUNNER === '1';
+// Windows 默认 fail-closed（P1 审计修复）: 缺 sandbox_runner.exe 即拒绝判题，
+// 不再静默回退裸跑——那与 README 的安全宣传不符。
+// 本地开发确需裸跑时显式设 NoldOJ_ALLOW_NO_SANDBOX=1（不安全）。
+// 非 Windows 平台无 runner 概念，保持传统路径（Linux 判题不经过此 Windows 沙箱）。
+// 兼容: 旧开关 NoldOJ_REQUIRE_RUNNER=1 与默认行为一致，可不再设置；
+//       NoldOJ_REQUIRE_RUNNER=0 已不再放行 Windows 缺 runner 的裸跑。
+const allowNoSandbox = process.env.NoldOJ_ALLOW_NO_SANDBOX === '1';
 function runCode(workDir, srcFile, exeFile, lang, stdin, timeLimitMs, memoryLimitMb, isWindows, problemType) {
   if (hasSandboxRunner && isWindows) {
     return runCodeSandboxed(workDir, srcFile, exeFile, lang, stdin, timeLimitMs, memoryLimitMb, isWindows, problemType === 'file_io');
   }
-  if (requireRunner) {
-    return Promise.reject(new Error('安全沙箱运行器缺失（NoldOJ_REQUIRE_RUNNER=1 启用 fail-closed），已拒绝执行。请编译 sandbox_runner.exe 或关闭该开关。'));
+  if (isWindows && !allowNoSandbox) {
+    return Promise.reject(new Error('安全沙箱运行器缺失（Windows 默认 fail-closed），已拒绝执行。请运行 backend/sandbox/build.bat 编译 sandbox_runner.exe，或显式设置 NoldOJ_ALLOW_NO_SANDBOX=1 以无沙箱运行（不安全，仅限本地开发）。'));
   }
   return runCodeLegacy(workDir, srcFile, exeFile, lang, stdin, timeLimitMs, memoryLimitMb, isWindows);
 }
@@ -458,11 +470,13 @@ function cleanupWorkDir(workDir) {
   // 顺带清理可能残留的判题元数据（位于 workDir 同级，正常在 close 时已删）
   try {
     fs.rmSync(path.join(config.sandbox.tempDir, path.basename(workDir) + '.meta.json'), { force: true });
-  } catch {}
+  } catch {
+    // 判题元数据残留清理尽力而为，正常路径在 close 时已删
+  }
   try {
     fs.rmSync(workDir, { recursive: true, force: true, maxRetries: 3 });
   } catch (e) {
-    console.warn(`[SANDBOX] 清理工作目录失败 ${workDir}: ${e && e.message}`);
+    logWarn('SANDBOX', `清理工作目录失败 ${workDir}: ${e && e.message}`);
   }
 }
 
@@ -501,10 +515,10 @@ function cleanupOrphanProcesses() {
     // 清理遗留临时工作目录
     for (const entry of fs.readdirSync(tempDir)) {
       const full = path.join(tempDir, entry);
-      try { fs.rmSync(full, { recursive: true, force: true, maxRetries: 3 }); } catch {}
+      try { fs.rmSync(full, { recursive: true, force: true, maxRetries: 3 }); } catch { /* 临时目录清理尽力而为 */ }
     }
     if (orphans.length > 0) {
-      console.log(`[ORPHAN] Killed ${orphans.length} orphaned sandbox process(es) from previous run`);
+      logInfo('ORPHAN', `Killed ${orphans.length} orphaned sandbox process(es) from previous run`);
     }
   } catch {
     // 清理失败不影响启动，仅记录

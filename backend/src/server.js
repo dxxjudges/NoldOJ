@@ -1,5 +1,10 @@
 ﻿const http = require('http');
 const express = require('express');
+// 必须紧跟 express 加载：给 Express 4 的 async 路由处理器补上错误边界。
+// 之前 async handler 同步抛错（如 db.prepare 失败）会变成 unhandledRejection，
+// 直接命中 server.js 末尾的 process.exit(1) 导致全站停服（P0）；
+// 接入后统一转发到下方错误中间件返回 500 JSON。
+require('express-async-errors');
 const multer = require('multer');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -11,25 +16,9 @@ const fs = require('fs');
 const config = require('../config/config');
 const { initDB } = require('../database/db');
 const db = require('../database/db');
-
-function ts() {
-  const d = new Date();
-  const pad = (n, w = 2) => String(n).padStart(w, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
-}
-
-const LOG_LEVELS = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
-const CURRENT_LEVEL = LOG_LEVELS.INFO;
-
-function log(level, tag, ...args) {
-  if (LOG_LEVELS[level] < CURRENT_LEVEL) return;
-  const prefix = `[${ts()}] [${level}] [${tag}]`;
-  console.log(prefix, ...args);
-}
-
-function logInfo(tag, msg) { log('INFO', tag, msg); }
-function logWarn(tag, msg) { log('WARN', tag, msg); }
-function logError(tag, msg) { log('ERROR', tag, msg); }
+// 日志实现统一抽到 utils/logger.js（输出格式与历史逐字一致）
+const { log, logInfo, logWarn, logError } = require('../utils/logger');
+const { sendNotFound } = require('../utils/apiErrors');
 
 // 日志脱敏逻辑集中到 utils/securityHelpers.js，各路由共享
 const { sanitizeLog } = require('../utils/securityHelpers');
@@ -178,7 +167,7 @@ async function main() {
   // 健康检查端点: 前端旧逻辑直接 GET /output.txt 探测服务是否在线，
   // 除以明确 404 防止根目录同名文件被当作被测数据外，还提供专用探针。
   app.get('/api/v1/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
-  app.get('/output.txt', (req, res) => res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Use /api/v1/health instead.' }));
+  app.get('/output.txt', (req, res) => sendNotFound(res, 'Use /api/v1/health instead.'));
 
   // 上传文件静态服务: nosniff 防 MIME 嗅探；仅图片内联，其余类型强制下载防 HTML/JS 内联执行
   app.use('/uploads', express.static(path.join(__dirname, '../../data/uploads'), {
@@ -288,7 +277,7 @@ async function main() {
 
   app.get('*', (req, res) => {
     if (req.path.startsWith('/api/')) {
-      return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'API endpoint not found.' });
+      return sendNotFound(res, 'API endpoint not found.');
     }
     fs.readFile(path.join(pagesRoot, 'index.html'), 'utf8', (err, html) => {
       if (err) return res.status(404).send('Not found');
@@ -330,12 +319,13 @@ async function main() {
 
   // ── 安全水位告警：这些状态会显著削弱隔离/边界，启动时必须可见 ──
   const runnerExe = path.join(__dirname, '../sandbox/sandbox_runner.exe');
-  if (process.platform === 'win32' && !fs.existsSync(runnerExe)) {
-    logWarn('SANDBOX', 'sandbox_runner.exe 未编译，将以传统模式裸跑用户代码（无 Job Object/受限令牌/低完整性隔离）');
-    logWarn('SANDBOX', '  修复: 执行 backend\\sandbox\\build.bat（或 start.bat 会自动编译）；或设 NoldOJ_REQUIRE_RUNNER=1 使缺 runner 时 fail-closed 拒绝判题');
+  const allowNoSandbox = process.env.NoldOJ_ALLOW_NO_SANDBOX === '1';
+  if (process.platform === 'win32' && !fs.existsSync(runnerExe) && !allowNoSandbox) {
+    logWarn('SANDBOX', 'sandbox_runner.exe 未编译: Windows 默认 fail-closed，判题将被拒绝执行');
+    logWarn('SANDBOX', '  修复: 执行 backend\\sandbox\\build.bat（或 start.bat 会自动编译）；或显式设 NoldOJ_ALLOW_NO_SANDBOX=1 改为不安全裸跑（仅限本地开发）');
   }
-  if (process.env.NoldOJ_REQUIRE_RUNNER === '1') {
-    logInfo('SANDBOX', 'NoldOJ_REQUIRE_RUNNER=1: 缺 sandbox_runner.exe 时将拒绝判题 (fail-closed)');
+  if (process.platform === 'win32' && !fs.existsSync(runnerExe) && allowNoSandbox) {
+    logWarn('SANDBOX', 'NoldOJ_ALLOW_NO_SANDBOX=1: 缺 sandbox_runner.exe 时将以传统模式裸跑用户代码（无 Job Object/受限令牌/低完整性隔离）');
   }
   if (!config.cors.restricted) {
     logWarn('CORS', 'CORS_RESTRICTED=false: 任意 Origin 可携带凭据调用 API，仅限本地/内网演示环境');
@@ -418,6 +408,6 @@ async function main() {
 }
 
 main().catch(err => {
-  console.error(`[${ts()}] [ERROR] [BOOT] Failed to start server:`, sanitizeLog(String(err && err.stack || err)));
+  logError('BOOT', `Failed to start server: ${sanitizeLog(String(err && err.stack || err))}`);
   process.exit(1);
 });

@@ -18,7 +18,7 @@
 <body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
   <div id="nav"></div>
   <div class="max-w-5xl mx-auto px-4 py-8">
-    <div id="content" class="text-center py-12 text-gray-400 dark:text-gray-500 dark:text-gray-400">加载中...</div>
+    <div id="content" aria-live="polite" class="text-center py-12 text-gray-400 dark:text-gray-500 dark:text-gray-400">加载中...</div>
   </div>
   <script>
     document.getElementById('nav').innerHTML = renderNav('contests');
@@ -251,7 +251,7 @@
             window.location.href = `/pages/virtual-contest.html?id=${err.virtual_contest_id}`;
           }
         } else {
-          alert(err.message || '启动失败');
+          showToast(err.message || '启动失败', 'error');
         }
       }
     }

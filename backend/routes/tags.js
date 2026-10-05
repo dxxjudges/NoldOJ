@@ -1,7 +1,9 @@
 const express = require('express');
-const db = require('../database/db');
+const tagsRepo = require('../repositories/tags');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { buildUpdates } = require('../utils/db');
+
+const { sendNotFound } = require('../utils/apiErrors');
 
 const router = express.Router();
 
@@ -15,11 +17,7 @@ function validateColor(color) {
 }
 
 router.get('/', (req, res) => {
-  const tags = db.prepare('SELECT * FROM tags ORDER BY name').all();
-  const countStmt = db.prepare('SELECT COUNT(*) as c FROM problem_tags WHERE tag_id = ?');
-  for (const tag of tags) {
-    tag.problem_count = countStmt.get(tag.id).c;
-  }
+  const tags = tagsRepo.listTagsWithCount();
   res.json(tags);
 });
 
@@ -31,7 +29,7 @@ router.post('/', requireAuth, requireRole('teacher'), (req, res) => {
   if (String(name).trim().length > 50) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'Tag name too long.' });
   }
-  const existing = db.prepare('SELECT id FROM tags WHERE name = ?').get(name.trim());
+  const existing = tagsRepo.findByName(name.trim());
   if (existing) {
     return res.status(409).json({ code: 2, reason: 'ERR_CONFLICT', message: 'Tag already exists.' });
   }
@@ -40,29 +38,29 @@ router.post('/', requireAuth, requireRole('teacher'), (req, res) => {
   catch (e) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: e.message });
   }
-  const result = db.prepare('INSERT INTO tags (name, color) VALUES (?, ?)').run(name.trim(), safeColor);
-  const tag = db.prepare('SELECT * FROM tags WHERE id = ?').get(result.lastInsertRowid);
+  const result = tagsRepo.insertTag(name.trim(), safeColor);
+  const tag = tagsRepo.getTag(result.lastInsertRowid);
   res.status(201).json(tag);
 });
 
 router.delete('/:id', requireAuth, requireRole('teacher'), (req, res) => {
-  const tag = db.prepare('SELECT * FROM tags WHERE id = ?').get(req.params.id);
+  const tag = tagsRepo.getTag(req.params.id);
   if (!tag) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Tag not found.' });
+    return sendNotFound(res, 'Tag not found.');
   }
-  db.prepare('DELETE FROM problem_tags WHERE tag_id = ?').run(tag.id);
-  db.prepare('DELETE FROM tags WHERE id = ?').run(tag.id);
+  tagsRepo.deleteProblemTags(tag.id);
+  tagsRepo.deleteTag(tag.id);
   res.json({ message: 'Tag deleted.' });
 });
 
 router.put('/:id', requireAuth, requireRole('teacher'), (req, res) => {
-  const tag = db.prepare('SELECT * FROM tags WHERE id = ?').get(req.params.id);
+  const tag = tagsRepo.getTag(req.params.id);
   if (!tag) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Tag not found.' });
+    return sendNotFound(res, 'Tag not found.');
   }
   const { name, color } = req.body;
   if (name !== undefined) {
-    const existing = db.prepare('SELECT id FROM tags WHERE name = ? AND id != ?').get(name.trim(), tag.id);
+    const existing = tagsRepo.findByNameExcluding(name.trim(), tag.id);
     if (existing) {
       return res.status(409).json({ code: 2, reason: 'ERR_CONFLICT', message: 'Tag name already exists.' });
     }
@@ -80,45 +78,33 @@ router.put('/:id', requireAuth, requireRole('teacher'), (req, res) => {
   if (updatesAndVals.count === 0) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'No fields to update.' });
   }
-  db.prepare(`UPDATE tags SET ${updatesAndVals.clause} WHERE id = ?`).run(...updatesAndVals.values, tag.id);
-  const updated = db.prepare('SELECT * FROM tags WHERE id = ?').get(tag.id);
+  tagsRepo.updateTag(tag.id, updatesAndVals);
+  const updated = tagsRepo.getTag(tag.id);
   res.json(updated);
 });
 
 router.post('/problem/:problemId', requireAuth, requireRole('teacher'), (req, res) => {
-  const problem = db.prepare('SELECT * FROM problems WHERE id = ?').get(req.params.problemId);
+  const problem = tagsRepo.getProblem(req.params.problemId);
   if (!problem) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Problem not found.' });
+    return sendNotFound(res, 'Problem not found.');
   }
   const { tag_ids } = req.body;
   if (!Array.isArray(tag_ids)) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'tag_ids array is required.' });
   }
-  db.prepare('DELETE FROM problem_tags WHERE problem_id = ?').run(problem.id);
-  const insert = db.prepare('INSERT INTO problem_tags (problem_id, tag_id) VALUES (?, ?)');
-  for (const tagId of tag_ids) {
-    const tag = db.prepare('SELECT id FROM tags WHERE id = ?').get(tagId);
-    if (tag) {
-      insert.run(problem.id, tagId);
-    }
-  }
+  tagsRepo.setProblemTags(problem.id, tag_ids);
   res.json({ message: 'Tags updated.' });
 });
 
 router.get('/problem/:problemId', (req, res) => {
-  const tags = db.prepare(`
-    SELECT t.* FROM tags t
-    JOIN problem_tags pt ON t.id = pt.tag_id
-    WHERE pt.problem_id = ?
-    ORDER BY t.name
-  `).all(req.params.problemId);
+  const tags = tagsRepo.listProblemTags(req.params.problemId);
   res.json(tags);
 });
 
 router.get('/:id', (req, res) => {
-  const tag = db.prepare('SELECT * FROM tags WHERE id = ?').get(req.params.id);
+  const tag = tagsRepo.getTag(req.params.id);
   if (!tag) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Tag not found.' });
+    return sendNotFound(res, 'Tag not found.');
   }
   res.json(tag);
 });

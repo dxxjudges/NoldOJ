@@ -2,6 +2,7 @@
 const os = require('os');
 const fs = require('fs');
 const crypto = require('crypto');
+const { logInfo, logError } = require('../utils/logger');
 
 // R9-13/D-L15: Windows 上 fs mode 不生效，config 目录下的密钥文件（jwt/email/ai/cors）
 // 默认继承宽松 DACL（Authenticated Users 可读）。统一用 icacls 收紧——
@@ -12,7 +13,9 @@ function hardenConfigFileAcl(filePath) {
   try {
     const user = `${process.env.USERDOMAIN || 'BUILTIN'}\\${process.env.USERNAME || 'Administrator'}`;
     execFileSync('icacls', [filePath, '/inheritance:r', '/grant:r', `${user}:(R,W)`, '/grant:r', 'SYSTEM:(F)', '/grant:r', 'Administrators:(F)'], { stdio: 'ignore', timeout: 10000 });
-  } catch {}
+  } catch {
+    // icacls 不可用/无权限时保持默认 ACL：尽力而为，不阻塞启动
+  }
 }
 
 function loadEmailConfig() {
@@ -27,7 +30,9 @@ function loadEmailConfig() {
       if (trimmed.startsWith('EMAIL_ENABLED=')) result.enabled = trimmed.split('=')[1] === 'true';
     }
     if (result.apiKey && result.apiKey !== 're_xxxxxxxxx') result.enabled = true;
-  } catch {}
+  } catch {
+    // config/email.txt 缺失或不可读时使用内置默认值
+  }
   hardenConfigFileAcl(emailPath); // R9-13
   return result;
 }
@@ -59,7 +64,9 @@ function loadAiConfig() {
       if (t.startsWith('TESTDATA_MODEL=')) result.testdata.model = t.split('=').slice(1).join('=');
       if (t.startsWith('TESTDATA_KEY=')) result.testdata.key = t.split('=').slice(1).join('=');
     }
-  } catch {}
+  } catch {
+    // config/ai.txt 缺失或不可读时使用内置默认值
+  }
   // 回退：未单独配置的字段继承 SECURITY_* 的值
   for (const sec of ['url', 'model', 'key']) {
     if (!result.hint[sec]) result.hint[sec] = result.security[sec];
@@ -81,7 +88,9 @@ function loadCaptchaConfig() {
       const t = line.trim();
       if (t.startsWith('CAPTCHA_ENABLED=')) result.enabled = t.split('=')[1].trim() === 'true';
     }
-  } catch {}
+  } catch {
+    // config/captcha.txt 缺失或不可读时使用默认值
+  }
   return result;
 }
 
@@ -98,7 +107,9 @@ function loadRegisterConfig() {
       const t = line.trim();
       if (t.startsWith('REGISTER_ENABLED=')) result.enabled = t.split('=').slice(1).join('=').trim() === 'true';
     }
-  } catch {}
+  } catch {
+    // config/register.txt 缺失或不可读时使用默认值
+  }
   return result;
 }
 function reloadRegisterConfig() {
@@ -124,7 +135,9 @@ function loadJudgeConfig() {
         if (v && v > 0) maxThreads = v;
       }
     }
-  } catch {}
+  } catch {
+    // config/judge.txt 缺失或不可读时使用默认并发数
+  }
   return { maxThreads };
 }
 
@@ -147,7 +160,9 @@ function loadJwtConfig() {
   try {
     const obj = read();
     if (obj.accessSecret && obj.refreshSecret && obj.emailCodeSecret) return obj;
-  } catch {}
+  } catch {
+    // config/jwt.txt 缺失/不可读/字段不全：落入下方首次启动生成分支
+  }
   // 首次启动: 生成 64 字节强随机密钥并写入文件
   const generated = {
     accessSecret: crypto.randomBytes(64).toString('hex'),
@@ -165,9 +180,9 @@ function loadJwtConfig() {
     fs.writeFileSync(jwtPath, fileContent, { mode: 0o600 });
     // D-L15/R9-13: Windows 上 fs mode 不生效（仅 Unix），用 icacls 收紧 ACL
     hardenConfigFileAcl(jwtPath);
-    console.log('[CONFIG] Generated config/jwt.txt with random secrets');
+    logInfo('CONFIG', 'Generated config/jwt.txt with random secrets');
   } catch (e) {
-    console.error('[CONFIG] Failed to write jwt.txt:', e.message);
+    logError('CONFIG', 'Failed to write jwt.txt:', e.message);
   }
   return generated;
 }
@@ -198,7 +213,9 @@ function loadCorsConfig() {
         origins.add(t.replace(/\/$/, ''));
       }
     }
-  } catch {}
+  } catch {
+    // config/cors.txt 缺失或不可读时使用内置默认源
+  }
   hardenConfigFileAcl(path.join(__dirname, '..', '..', 'config', 'cors.txt')); // R9-13
   return { restricted, origins: Array.from(origins) };
 }
@@ -217,7 +234,9 @@ function loadSecurityContact() {
         if (v) return v;
       }
     }
-  } catch {}
+  } catch {
+    // config/security.txt 缺失或不可读时使用仓库默认地址
+  }
   return 'https://github.com/dxxjudges/NoldOJ';
 }
 
@@ -250,7 +269,7 @@ module.exports = {
     maxOutputSize: 16 * 1024 * 1024,
     maxSourceSize: 64 * 1024,
     // 安全沙箱: 编译 sandbox_runner.cpp 后自动启用 Job Object + 受限令牌隔离
-    // 未编译时自动回退到传统模式 (spawn + memwatch)
+    // Windows 未编译时默认 fail-closed 拒绝判题（NoldOJ_ALLOW_NO_SANDBOX=1 才回退传统模式）
     networkIsolation: true,   // 断网: 通过受限令牌剥离网络相关特权
     killOnJobClose: true,     // Job 关闭时杀死整棵进程树
     noBreakaway: true,        // 禁止子进程脱离沙箱

@@ -1,7 +1,7 @@
 ﻿const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const db = require('../database/db');
+const authRepo = require('../repositories/auth');
 const config = require('../config/config');
 const { requireAuth } = require('../middleware/auth');
 const { createRateLimit } = require('../middleware/ratelimit');
@@ -10,6 +10,8 @@ const { generateCaptcha, verifyCaptcha } = require('../services/captcha');
 const { generateAccessToken, generateRefreshToken } = require('../utils/tokens');
 const { isStrongPassword } = require('../utils/validation');
 const { sanitizeText } = require('../utils/securityHelpers');
+
+const { sendNotFound } = require('../utils/apiErrors');
 
 const router = express.Router();
 const registerRateLimit = createRateLimit({ windowMs: 3600000, max: 1 });
@@ -44,7 +46,7 @@ function setRefreshCookie(res, refreshToken) {
 
 router.get('/captcha', (req, res) => {
   if (!config.captcha.enabled) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Captcha disabled' });
+    return sendNotFound(res, 'Captcha disabled');
   }
   const captcha = generateCaptcha();
   // NoldOJ_CAPTCHA_DEBUG=1 时 generateCaptcha 返回 code（仅测试用），其余情况只有 id/svg
@@ -95,7 +97,7 @@ router.post('/forgot-password', forgotPasswordRateLimit, requireCaptcha, async (
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '请输入有效的邮箱地址。' });
   }
-  const user = db.prepare('SELECT id, username, email, email_verified FROM users WHERE username = ?').get(username);
+  const user = authRepo.getUserAuth(username);
   // 用户不存在、未绑定邮箱、邮箱不匹配均视为发送失败，返回同一提示，防止枚举已注册账号
   if (!user || !user.email || !user.email_verified || user.email !== email) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '未找到与用户名匹配且已验证的邮箱，无法发送重置邮件。' });
@@ -121,7 +123,7 @@ router.post('/reset-password', resetPasswordRateLimit, (req, res) => {
   if (!isStrongPassword(new_password)) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '密码至少 8 位，且须包含字母与数字或符号。' });
   }
-  const user = db.prepare('SELECT id, username, email, email_verified FROM users WHERE username = ?').get(username);
+  const user = authRepo.getUserAuth(username);
   if (!user || !user.email || !user.email_verified || user.email !== email) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '用户名与邮箱不匹配。' });
   }
@@ -129,10 +131,7 @@ router.post('/reset-password', resetPasswordRateLimit, (req, res) => {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '验证码无效或已过期。' });
   }
   const hash = bcrypt.hashSync(new_password, 10);
-  db.prepare("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?").run(hash, user.id);
-  // 重置后强制所有会话下线
-  db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(user.id);
-  db.prepare("UPDATE users SET force_logout_at = datetime('now') WHERE id = ?").run(user.id);
+  authRepo.resetPassword(user.id, hash);
   res.json({ message: '密码已重置，请使用新密码登录。' });
 });
 
@@ -146,7 +145,7 @@ router.post('/login', loginRateLimit, requireCaptcha, async (req, res) => {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'Username and password are required.' });
   }
 
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  const user = authRepo.getUserForLogin(username);
   // D-L1: 用户不存在时也执行一次 bcrypt 对比，抹平计时侧信道（防用户名枚举）
   if (!user) {
     bcrypt.compareSync(password, '$2a$10$7QJN4k1P0bWtHjM6Y0vzOe0Y2kZ3p4q5r6s7t8u9v0w1x2y3z4a');
@@ -190,7 +189,7 @@ router.post('/register', requireRegisterOpen, registerRateLimit, requireCaptcha,
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '请输入有效的邮箱地址。' });
     }
-    const emailExists = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    const emailExists = authRepo.findUserByEmail(email);
     if (emailExists) {
       return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '注册信息不可用，请更换用户名或邮箱后重试。' });
     }
@@ -210,18 +209,18 @@ router.post('/register', requireRegisterOpen, registerRateLimit, requireCaptcha,
   if (!isStrongPassword(password)) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '密码至少 8 位，且须包含字母与数字或符号。' });
   }
-  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+  const existing = authRepo.findUserByUsername(username);
   if (existing) {
     // 与格式错误返回相同信息，避免枚举已有用户名
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '注册信息不可用，请更换用户名或邮箱后重试。' });
   }
   const hash = bcrypt.hashSync(password, 10);
-  const newId = db.findNextId('users');
   const emailVerified = config.email.enabled && email ? 1 : 0;
   const safeNickname = sanitizeText(nickname || username, 50) || username;
-  db.prepare('INSERT INTO users (id, username, password_hash, nickname, role, email, email_verified) VALUES (?, ?, ?, ?, ?, ?, ?)').run(newId, username, hash, safeNickname, 'user', email || '', emailVerified);
-  const accessToken = generateAccessToken(newId);
-  const refreshToken = generateRefreshToken(newId);
+  const registered = authRepo.registerUser(username, hash, safeNickname, email || '', emailVerified);
+  const newId = registered.id;
+  const accessToken = registered.accessToken;
+  const refreshToken = registered.refreshToken;
 
   setRefreshCookie(res, refreshToken);
 
@@ -238,22 +237,22 @@ router.post('/refresh', refreshRateLimit, (req, res) => {
   }
   try {
     const payload = jwt.verify(refreshToken, config.jwt.refreshSecret, { algorithms: ['HS256'] });
-    const user = db.prepare('SELECT id, banned, force_logout_at FROM users WHERE id = ?').get(payload.userId);
+    const user = authRepo.getUserRefreshInfo(payload.userId);
     if (!user) {
       return res.status(401).json({ code: 5, reason: 'ERR_UNAUTHORIZED', message: 'User not found.' });
     }
     if (user.banned) {
-      db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(payload.userId);
+      authRepo.deleteRefreshTokensByUser(payload.userId);
       return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Account has been banned.' });
     }
     if (user.force_logout_at && payload.iat) {
       const forceTime = Math.floor(new Date(user.force_logout_at + 'Z').getTime() / 1000);
       if (payload.iat < forceTime) {
-        db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(payload.userId);
+        authRepo.deleteRefreshTokensByUser(payload.userId);
         return res.status(401).json({ code: 5, reason: 'ERR_UNAUTHORIZED', message: 'You have been logged out.' });
       }
     }
-    const tokens = db.prepare('SELECT * FROM refresh_tokens WHERE user_id = ? AND token_prefix = ? AND expires_at > datetime(\'now\')').all(payload.userId, refreshToken.slice(0, 24));
+    const tokens = authRepo.listActiveRefreshTokens(payload.userId, refreshToken.slice(0, 24));
     let validToken = null;
     for (const t of tokens) {
       if (bcrypt.compareSync(refreshToken, t.token_hash)) {
@@ -264,18 +263,13 @@ router.post('/refresh', refreshRateLimit, (req, res) => {
     if (!validToken) {
       return res.status(401).json({ code: 5, reason: 'ERR_UNAUTHORIZED', message: 'Invalid refresh token.' });
     }
-    // 原子消费该 refresh token: 并发刷新时后到者 delete 影响 0 行，判定为已使用
-    const del = db.prepare('DELETE FROM refresh_tokens WHERE id = ?').run(validToken.id);
-    if (del.changes === 0) {
-      db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(payload.userId);
+    const rotated = authRepo.rotateRefreshToken(payload.userId, validToken.id);
+    if (rotated.alreadyUsed) {
       return res.status(401).json({ code: 5, reason: 'ERR_UNAUTHORIZED', message: 'Refresh token already used, please login again.' });
     }
-    const newAccessToken = generateAccessToken(payload.userId);
-    const newRefreshToken = generateRefreshToken(payload.userId);
+    setRefreshCookie(res, rotated.refreshToken);
 
-    setRefreshCookie(res, newRefreshToken);
-
-    res.json({ access_token: newAccessToken });
+    res.json({ access_token: rotated.accessToken });
   } catch {
     return res.status(401).json({ code: 5, reason: 'ERR_UNAUTHORIZED', message: 'Invalid or expired refresh token.' });
   }
@@ -287,14 +281,16 @@ router.post('/logout', (req, res) => {
     try {
       const payload = jwt.verify(refreshToken, config.jwt.refreshSecret, { algorithms: ['HS256'] });
       // 仅删除当前使用的 refresh token，不影响其他登录会话
-      const tokens = db.prepare('SELECT id, token_hash FROM refresh_tokens WHERE user_id = ?').all(payload.userId);
+      const tokens = authRepo.listRefreshTokenHashes(payload.userId);
       for (const t of tokens) {
         if (bcrypt.compareSync(refreshToken, t.token_hash)) {
-          db.prepare('DELETE FROM refresh_tokens WHERE id = ?').run(t.id);
+          authRepo.deleteRefreshToken(t.id);
           break;
         }
       }
-    } catch {}
+    } catch {
+      // 注销尽力而为：无效/过期 token 或删除失败都不阻塞登出
+    }
   }
   res.clearCookie('refresh_token');
   res.json({ message: 'Logged out successfully.' });
@@ -308,15 +304,12 @@ router.post('/change-password', requireAuth, changePasswordRateLimit, (req, res)
   if (!isStrongPassword(new_password)) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '密码至少 8 位，且须包含字母与数字或符号。' });
   }
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  const user = authRepo.getUserById(req.user.id);
   if (!bcrypt.compareSync(old_password, user.password_hash)) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'Old password is incorrect.' });
   }
   const hash = bcrypt.hashSync(new_password, 10);
-  db.prepare('UPDATE users SET password_hash = ?, updated_at = datetime(\'now\') WHERE id = ?').run(hash, req.user.id);
-  // D-L2: 修改密码同时吊销旧 access token（否则最长 15 分钟仍有效）
-  db.prepare("UPDATE users SET force_logout_at = datetime('now') WHERE id = ?").run(req.user.id);
-  db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(req.user.id);
+  authRepo.changePassword(req.user.id, hash);
   res.json({ message: 'Password changed successfully.' });
 });
 

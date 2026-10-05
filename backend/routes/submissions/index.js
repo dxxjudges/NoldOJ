@@ -1,17 +1,20 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const db = require('../database/db');
-const { requireAuth, requireRole } = require('../middleware/auth');
-const { createRateLimit } = require('../middleware/ratelimit');
-const { enqueueSubmission } = require('../services/judge');
-const { reviewCode, CODE_LENGTH_LIMIT } = require('../services/security');
-const { sanitizeLog, banUserAndRevoke } = require('../utils/securityHelpers');
-const { parsePageLimit } = require('../utils/pagination');
-const { checkExamWindow } = require('../utils/examWindow');
-const { problemVisibilityError } = require('../utils/visibility');
-const { checkExamTimeLimit, startAttempt, SUBMIT_GRACE_MS } = require('../utils/examAttempts');
-const config = require('../config/config');
+const { requireAuth, requireRole } = require('../../middleware/auth');
+const { createRateLimit } = require('../../middleware/ratelimit');
+const { enqueueSubmission } = require('../../services/judge');
+const { reviewCode, CODE_LENGTH_LIMIT } = require('../../services/security');
+const { sanitizeLog, banUserAndRevoke } = require('../../utils/securityHelpers');
+const { parsePageLimit } = require('../../utils/pagination');
+const { checkExamWindow } = require('../../utils/examWindow');
+const { problemVisibilityError } = require('../../utils/visibility');
+const { checkExamTimeLimit, startAttempt, SUBMIT_GRACE_MS } = require('../../utils/examAttempts');
+const config = require('../../config/config');
+const repo = require('../../repositories/submissions');
+
+const { sendNotFound } = require('../../utils/apiErrors');
+const { logInfo, logError } = require('../../utils/logger');
 
 const router = express.Router();
 const rateLimit = createRateLimit(config.rateLimit.submissions);
@@ -54,47 +57,28 @@ router.get('/', requireAuth, (req, res) => {
     params.push(parseFloat(score_max));
   }
 
-  const total = db.prepare(`SELECT COUNT(*) as c FROM submissions s LEFT JOIN users u ON s.user_id = u.id ${where}`).get(...params).c;
-  const submissions = db.prepare(`
-    SELECT s.id, s.user_id, s.problem_id, s.language, s.status, s.score, s.time_used, s.memory_used, s.created_at,
-           u.username, p.title as problem_title
-    FROM submissions s
-    LEFT JOIN users u ON s.user_id = u.id
-    LEFT JOIN problems p ON s.problem_id = p.id
-    ${where} ORDER BY s.id DESC LIMIT ? OFFSET ?
-  `).all(...params, limitNum, offset);
+  const total = repo.countList(where, params);
+  const submissions = repo.listPage(where, params, limitNum, offset);
 
   res.json({ total, page: pageNum, limit: limitNum, submissions });
 });
 
 router.get('/:id', requireAuth, (req, res) => {
-  const submission = db.prepare(`
-    SELECT s.*, u.username, p.title as problem_title, p.time_limit, p.memory_limit
-    FROM submissions s
-    LEFT JOIN users u ON s.user_id = u.id
-    LEFT JOIN problems p ON s.problem_id = p.id
-    WHERE s.id = ?
-  `).get(req.params.id);
+  const submission = repo.findByIdWithProblem(req.params.id);
 
   if (!submission) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Submission not found.' });
+    return sendNotFound(res, 'Submission not found.');
   }
 
   if (req.user.role === 'user' && submission.user_id !== req.user.id) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Cannot view other users\' submissions.' });
   }
 
-  const details = db.prepare(`
-    SELECT sd.*, tg.subtask_id as group_subtask_id, tg.score as group_score
-    FROM submission_details sd
-    LEFT JOIN test_groups tg ON sd.group_id = tg.id
-    WHERE sd.submission_id = ?
-    ORDER BY COALESCE(sd.group_id, 0), sd.id
-  `).all(submission.id);
+  const details = repo.listDetails(submission.id);
 
-  const testGroups = db.prepare('SELECT id, subtask_id, score FROM test_groups WHERE problem_id = ? ORDER BY id').all(submission.problem_id);
+  const testGroups = repo.listTestGroups(submission.problem_id);
 
-  const files = db.prepare('SELECT filename, content FROM submission_files WHERE submission_id = ? ORDER BY id').all(submission.id);
+  const files = repo.listFiles(submission.id);
   const canViewCode = req.user.role !== 'user' || submission.user_id === req.user.id;
 
   res.json({
@@ -123,15 +107,15 @@ router.post('/', requireAuth, rateLimit, async (req, res) => {
   }
 
   if (req.user.role !== 'su' && !req.user.submit_lock_exempt) {
-    const pending = db.prepare("SELECT id FROM submissions WHERE user_id = ? AND status IN ('pending_review','pending','running','compiling','judging') LIMIT 1").get(req.user.id);
+    const pending = repo.findPendingByUser(req.user.id);
     if (pending) {
       return res.status(429).json({ code: 4, reason: 'ERR_SUBMIT_LIMIT_EXCEEDED', message: '您有尚未完成的提交，请等待评测完成后再提交。' });
     }
   }
 
-  const problem = db.prepare('SELECT * FROM problems WHERE id = ?').get(problem_id);
+  const problem = repo.findProblemById(problem_id);
   if (!problem) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Problem not found.' });
+    return sendNotFound(res, 'Problem not found.');
   }
 
   // ── 可见性校验（与 GET /problems/:id 保持一致）──
@@ -146,9 +130,9 @@ router.post('/', requireAuth, rateLimit, async (req, res) => {
   // ── 试卷编程题提交校验 ──
   let examAttempt = null;
   if (problem.exam_id) {
-    const exam = db.prepare('SELECT * FROM exams WHERE id = ?').get(problem.exam_id);
+    const exam = repo.findExamById(problem.exam_id);
     if (!exam) {
-      return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Exam not found.' });
+      return sendNotFound(res, 'Exam not found.');
     }
     if (Number(req.body.exam_id) !== problem.exam_id) {
       return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'exam_id 与题目不匹配。' });
@@ -164,7 +148,7 @@ router.post('/', requireAuth, rateLimit, async (req, res) => {
     if (winMsg) {
       return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: winMsg });
     }
-    const inExam = db.prepare("SELECT id FROM exam_questions WHERE exam_id = ? AND problem_id = ? AND question_type = 'program'").get(exam.id, problem_id);
+    const inExam = repo.findExamProgramQuestion(exam.id, problem_id);
     if (!inExam) {
       return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '该题不是此试卷的编程题。' });
     }
@@ -172,7 +156,7 @@ router.post('/', requireAuth, rateLimit, async (req, res) => {
       return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '考试题不支持比赛提交。' });
     }
     // 尝试号 = 已交卷次数 + 1（交卷前的作答归属于即将创建的那次尝试）
-    const attemptCount = db.prepare('SELECT COUNT(*) as c FROM exam_submissions WHERE exam_id = ? AND user_id = ?').get(exam.id, req.user.id).c;
+    const attemptCount = repo.countExamSubmissions(exam.id, req.user.id);
     if (exam.max_attempts > 0 && attemptCount >= exam.max_attempts) {
       return res.status(400).json({ code: 1, reason: 'ERR_MAX_ATTEMPTS', message: '考试尝试次数已用尽，无法再提交代码。' });
     }
@@ -185,8 +169,7 @@ router.post('/', requireAuth, rateLimit, async (req, res) => {
     }
     // 每次尝试每题仅 1 次提交（teacher+ 可重复提交以便调试）
     if (req.user.role === 'user') {
-      const used = db.prepare('SELECT COUNT(*) as c FROM submissions WHERE exam_id = ? AND user_id = ? AND exam_attempt = ? AND problem_id = ?')
-        .get(exam.id, req.user.id, examAttempt, problem_id).c;
+      const used = repo.countAttemptSubmissions(exam.id, req.user.id, examAttempt, problem_id);
       if (used > 0) {
         return res.status(400).json({ code: 1, reason: 'ERR_ALREADY_SUBMITTED', message: '本场考试该题只能提交一次。' });
       }
@@ -199,9 +182,9 @@ router.post('/', requireAuth, rateLimit, async (req, res) => {
   // 功能9：虚拟比赛提交校验
   let effectiveVirtualContestId = virtual_contest_id || null;
   if (virtual_contest_id) {
-    const vc = db.prepare('SELECT * FROM virtual_contests WHERE id = ?').get(virtual_contest_id);
+    const vc = repo.findVirtualContestById(virtual_contest_id);
     if (!vc) {
-      return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Virtual contest not found.' });
+      return sendNotFound(res, 'Virtual contest not found.');
     }
     if (vc.user_id !== req.user.id) {
       return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: '无权向他人虚拟比赛提交。' });
@@ -210,7 +193,7 @@ router.post('/', requireAuth, rateLimit, async (req, res) => {
       return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '虚拟比赛已结束，无法提交。' });
     }
     // 题目必须在原比赛的题目列表中
-    const inContest = db.prepare('SELECT 1 FROM contest_problems WHERE contest_id = ? AND problem_id = ?').get(vc.contest_id, problem_id);
+    const inContest = repo.isProblemInContest(vc.contest_id, problem_id);
     if (!inContest) {
       return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '此题目不在该虚拟比赛中。' });
     }
@@ -218,9 +201,9 @@ router.post('/', requireAuth, rateLimit, async (req, res) => {
 
   // 直接比赛提交校验（非虚拟比赛）
   if (contest_id && !virtual_contest_id) {
-    const contest = db.prepare('SELECT * FROM contests WHERE id = ?').get(contest_id);
+    const contest = repo.findContestById(contest_id);
     if (!contest) {
-      return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Contest not found.' });
+      return sendNotFound(res, 'Contest not found.');
     }
     // 检查比赛是否正在进行
     const now = Date.now();
@@ -233,21 +216,21 @@ router.post('/', requireAuth, rateLimit, async (req, res) => {
       return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '比赛已结束。' });
     }
     // 检查题目是否在比赛中
-    const inContest = db.prepare('SELECT 1 FROM contest_problems WHERE contest_id = ? AND problem_id = ?').get(contest_id, problem_id);
+    const inContest = repo.isProblemInContest(contest_id, problem_id);
     if (!inContest) {
       return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '此题目不在该比赛中。' });
     }
     // 检查用户是否已加入比赛
-    const participant = db.prepare('SELECT id FROM contest_participants WHERE contest_id = ? AND user_id = ?').get(contest_id, req.user.id);
+    const participant = repo.findContestParticipant(contest_id, req.user.id);
     if (!participant) {
       // 自动加入比赛
-      db.prepare('INSERT INTO contest_participants (contest_id, user_id) VALUES (?, ?)').run(contest_id, req.user.id);
+      repo.insertContestParticipant(contest_id, req.user.id);
     }
     // 查找或创建该用户在此比赛的虚拟参赛记录，用于关联提交
-    let vc = db.prepare('SELECT id FROM virtual_contests WHERE contest_id = ? AND user_id = ?').get(contest_id, req.user.id);
+    let vc = repo.findUserVirtualContest(contest_id, req.user.id);
     if (!vc) {
       // 创建虚拟参赛记录（比赛进行中创建的视为实时参赛）
-      const result = db.prepare('INSERT INTO virtual_contests (contest_id, user_id, start_time, end_time, status) VALUES (?, ?, datetime(?, \'unixepoch\'), datetime(?, \'unixepoch\'), ?)').run(
+      const result = repo.insertVirtualContest(
         contest_id, req.user.id,
         Math.floor(startTime / 1000),
         Math.floor(endTime / 1000),
@@ -295,22 +278,22 @@ router.post('/', requireAuth, rateLimit, async (req, res) => {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: `Language '${language}' is not allowed for this problem.` });
   }
 
-  const langCheck = db.prepare('SELECT id FROM languages WHERE name = ? AND is_enabled = 1').get(language);
+  const langCheck = repo.findEnabledLanguage(language);
   if (!langCheck) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: `Language '${language}' is not available.` });
   }
 
-  const newId = db.findNextId('submissions');
-  db.prepare('INSERT INTO submissions (id, user_id, problem_id, language, source_code, answer_data, status, virtual_contest_id, exam_id, exam_attempt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-    newId, req.user.id, problem_id, language, mainCode, answer_data || '', 'pending_review', effectiveVirtualContestId,
-    problem.exam_id || null, examAttempt || 0
-  );
-
-  // 写入多文件记录
-  if (normalizedFiles.length > 0) {
-    const insFile = db.prepare('INSERT INTO submission_files (submission_id, filename, content) VALUES (?, ?, ?)');
-    for (const f of normalizedFiles) insFile.run(newId, f.filename, f.content);
-  }
+  const newId = repo.insertSubmissionWithFiles({
+    userId: req.user.id,
+    problemId: problem_id,
+    language,
+    sourceCode: mainCode,
+    answerData: answer_data || '',
+    virtualContestId: effectiveVirtualContestId,
+    examId: problem.exam_id || null,
+    examAttempt: examAttempt || 0,
+    files: normalizedFiles
+  });
 
   res.status(201).json({
     submission_id: newId,
@@ -320,65 +303,49 @@ router.post('/', requireAuth, rateLimit, async (req, res) => {
   if (mainCode && mainCode.length >= 50) {
     reviewCode(mainCode, language).then(result => {
       if (!result.safe) {
-        console.log(`[Security] Malicious code detected in submission #${newId} by user #${req.user.id}: ${sanitizeLog(result.reason)}`);
+        logInfo('Security', `Malicious code detected in submission #${newId} by user #${req.user.id}: ${sanitizeLog(result.reason)}`);
         // D-M4: 仅正则命中 + AI 双重确认才永久封号；仅拦截不封号，避免误伤
         if (result.confirmed) banUserAndRevoke(req.user.id);
-        db.prepare("UPDATE submissions SET status = 'system_error' WHERE id = ?").run(newId);
+        repo.markSystemError(newId);
       } else {
-        db.prepare("UPDATE submissions SET status = 'pending' WHERE id = ?").run(newId);
+        repo.markPending(newId);
         enqueueSubmission(newId);
       }
     }).catch(e => {
-      console.error('Async security review error:', sanitizeLog(String(e && e.message)));
+      logError('INDEX', 'Async security review error:', sanitizeLog(String(e && e.message)));
       // Fail-Closed: 审查服务异常时不放行，标记 system_error 由管理员处理
-      db.prepare("UPDATE submissions SET status = 'system_error' WHERE id = ?").run(newId);
+      repo.markSystemError(newId);
     });
   } else {
-    db.prepare("UPDATE submissions SET status = 'pending' WHERE id = ?").run(newId);
+    repo.markPending(newId);
     enqueueSubmission(newId);
   }
 });
 
 router.get('/:id/detail', requireAuth, (req, res) => {
-  const submission = db.prepare(`
-    SELECT s.*, u.username, p.title as problem_title, p.time_limit, p.memory_limit
-    FROM submissions s
-    LEFT JOIN users u ON s.user_id = u.id
-    LEFT JOIN problems p ON s.problem_id = p.id
-    WHERE s.id = ?
-  `).get(req.params.id);
+  const submission = repo.findByIdWithProblem(req.params.id);
   if (!submission) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Submission not found.' });
+    return sendNotFound(res, 'Submission not found.');
   }
   if (req.user.role === 'user' && submission.user_id !== req.user.id) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Access denied.' });
   }
-  const details = db.prepare(`
-    SELECT sd.*, tg.subtask_id as group_subtask_id, tg.score as group_score
-    FROM submission_details sd
-    LEFT JOIN test_groups tg ON sd.group_id = tg.id
-    WHERE sd.submission_id = ?
-    ORDER BY COALESCE(sd.group_id, 0), sd.id
-  `).all(submission.id);
-  const testGroups = db.prepare('SELECT id, subtask_id, score FROM test_groups WHERE problem_id = ? ORDER BY id').all(submission.problem_id);
+  const details = repo.listDetails(submission.id);
+  const testGroups = repo.listTestGroups(submission.problem_id);
   res.json({ submission, details, test_groups: testGroups });
 });
 
 // 代码 Diff View：返回同用户同题的上一次提交代码 + 当前代码；WA 时附带期望/实际输出
 router.get('/:id/diff', requireAuth, (req, res) => {
-  const submission = db.prepare('SELECT id, user_id, problem_id, source_code, status FROM submissions WHERE id = ?').get(req.params.id);
+  const submission = repo.findForDiff(req.params.id);
   if (!submission) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Submission not found.' });
+    return sendNotFound(res, 'Submission not found.');
   }
   if (req.user.role === 'user' && submission.user_id !== req.user.id) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Access denied.' });
   }
 
-  const prev = db.prepare(`
-    SELECT id, source_code FROM submissions
-    WHERE user_id = ? AND problem_id = ? AND id < ?
-    ORDER BY id DESC LIMIT 1
-  `).get(submission.user_id, submission.problem_id, submission.id);
+  const prev = repo.findPrevSubmission(submission.user_id, submission.problem_id, submission.id);
 
   const result = {
     prev_id: prev ? prev.id : null,
@@ -388,13 +355,7 @@ router.get('/:id/diff', requireAuth, (req, res) => {
 
   // WA 时附带首个 WA 测试点的期望输出 vs 实际输出
   if (submission.status === 'wrong_answer') {
-    const waDetail = db.prepare(`
-      SELECT sd.stdout, sd.test_case_id, tc.output_data, tc.output_file, tc.problem_id
-      FROM submission_details sd
-      LEFT JOIN test_cases tc ON sd.test_case_id = tc.id
-      WHERE sd.submission_id = ? AND sd.status = 'wrong_answer'
-      ORDER BY sd.id LIMIT 1
-    `).get(submission.id);
+    const waDetail = repo.findFirstWrongAnswerDetail(submission.id);
     if (waDetail) {
       let expected = waDetail.output_data || '';
       if (!expected && waDetail.output_file) {
@@ -415,7 +376,9 @@ router.get('/:id/diff', requireAuth, (req, res) => {
             const stat = fs.statSync(resolved);
             if (stat.size <= 16 * 1024 * 1024) expected = fs.readFileSync(resolved, 'utf8');
           }
-        } catch {}
+        } catch {
+          // 读取失败/文件缺失时保持空串兜底，不影响响应
+        }
       }
       result.expected_output = expected;
       result.actual_output = waDetail.stdout || '';
@@ -427,24 +390,24 @@ router.get('/:id/diff', requireAuth, (req, res) => {
 });
 
 router.post('/:id/rejudge', requireAuth, requireRole('teacher'), (req, res) => {
-  const submission = db.prepare('SELECT * FROM submissions WHERE id = ?').get(req.params.id);
+  const submission = repo.findSubmissionById(req.params.id);
   if (!submission) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Submission not found.' });
+    return sendNotFound(res, 'Submission not found.');
   }
   const prevStatus = submission.status;
-  db.prepare("UPDATE submissions SET status = 'pending_rejudge', score = 0, time_used = 0, memory_used = 0 WHERE id = ?").run(submission.id);
-  db.prepare('DELETE FROM submission_details WHERE submission_id = ?').run(submission.id);
+  repo.resetForRejudge(submission.id);
+  repo.clearDetails(submission.id);
   enqueueSubmission(submission.id, prevStatus);
   res.json({ message: 'Submission queued for re-judge.' });
 });
 
 router.delete('/:id', requireAuth, requireRole('admin'), (req, res) => {
-  const submission = db.prepare('SELECT * FROM submissions WHERE id = ?').get(req.params.id);
+  const submission = repo.findSubmissionById(req.params.id);
   if (!submission) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Submission not found.' });
+    return sendNotFound(res, 'Submission not found.');
   }
-  db.prepare('DELETE FROM submission_details WHERE submission_id = ?').run(submission.id);
-  db.prepare('DELETE FROM submissions WHERE id = ?').run(submission.id);
+  repo.clearDetails(submission.id);
+  repo.deleteSubmission(submission.id);
   res.json({ message: 'Submission deleted.' });
 });
 

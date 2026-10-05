@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcryptjs');
-const db = require('../database/db');
+const usersRepo = require('../repositories/users');
 const config = require('../config/config');
 const { requireAuth, requireRole, optionalAuth } = require('../middleware/auth');
 const { sanitizeLog, sanitizeText } = require('../utils/securityHelpers');
@@ -12,12 +12,15 @@ const { buildUpdates } = require('../utils/db');
 const { generateAccessToken } = require('../utils/tokens');
 const { isStrongPassword } = require('../utils/validation');
 
+const { sendNotFound } = require('../utils/apiErrors');
+const { logInfo } = require('../utils/logger');
+
 const router = express.Router();
 
 // 结构化审计日志: 记录敏感管理操作（操作者 → 目标），脱敏后输出
 function audit(operator, action, target) {
   const t = target ? `${sanitizeLog(target.username)}(id=${target.id})` : 'n/a';
-  console.log(`[AUDIT] ${sanitizeLog(action)}: operator=${sanitizeLog(operator.username)}(id=${operator.id}) -> target=${t} at ${new Date().toISOString()}`);
+  logInfo('AUDIT', `${sanitizeLog(action)}: operator=${sanitizeLog(operator.username)}(id=${operator.id}) -> target=${t} at ${new Date().toISOString()}`);
 }
 
 // R12-3: 注册开关查询/热切换 (仅超管)。写在 /:id 之前避免被通配路由吞掉
@@ -51,11 +54,8 @@ router.get('/rating', optionalAuth, (req, res) => {
     }
     where = '';
   }
-  const total = db.prepare(`SELECT COUNT(*) as c FROM users ${where}`).get().c;
-  const users = db.prepare(`
-    SELECT id, username, nickname, role, rating, created_at
-    FROM users ${where} ORDER BY rating DESC, created_at ASC LIMIT ? OFFSET ?
-  `).all(limitNum, offset);
+  const total = usersRepo.countUsers(where);
+  const users = usersRepo.listRating(where, limitNum, offset);
   res.json({ total, page: pageNum, limit: limitNum, users });
 });
 
@@ -64,15 +64,15 @@ router.get('/rating', optionalAuth, (req, res) => {
 router.get('/:id/profile', (req, res) => {
   // hide_rating 一并返回：与 hide_achievements / hide_dashboard / hide_favorites 一样，
   // 由前端据此决定是否展示 Rating（排行榜本身已过滤，个人页此前漏了这一项）
-  const user = db.prepare('SELECT id, username, nickname, role, signature, bio, rating, hide_rating, hide_achievements, hide_dashboard, hide_favorites, created_at FROM users WHERE id = ?').get(req.params.id);
+  const user = usersRepo.getProfile(req.params.id);
   if (!user) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'User not found.' });
+    return sendNotFound(res, 'User not found.');
   }
   res.json(user);
 });
 
 router.get('/me', requireAuth, (req, res) => {
-  const user = db.prepare('SELECT id, username, nickname, role, signature, bio, rating, preferred_language, submit_lock_exempt, hide_rating, hide_achievements, hide_dashboard, hide_favorites, created_at FROM users WHERE id = ?').get(req.user.id);
+  const user = usersRepo.getMe(req.user.id);
   res.json(user);
 });
 
@@ -87,7 +87,7 @@ router.put('/me', requireAuth, (req, res) => {
   // 10.3: preferred_language 必须是已启用语言名之一，且限长，防止任意值/超长字符串入库
   if (preferred_language !== undefined && preferred_language !== null && preferred_language !== '') {
     const lang = String(preferred_language).slice(0, 32);
-    const exists = db.prepare('SELECT name FROM languages WHERE name = ? AND is_enabled = 1').get(lang);
+    const exists = usersRepo.findEnabledLanguage(lang);
     if (!exists) {
       return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'preferred_language 必须是已启用的语言。' });
     }
@@ -106,8 +106,8 @@ router.put('/me', requireAuth, (req, res) => {
   if (u.count === 0) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'No fields to update.' });
   }
-  db.prepare(`UPDATE users SET ${u.clause} WHERE id = ?`).run(...u.values, req.user.id);
-  const user = db.prepare('SELECT id, username, nickname, role, signature, bio, rating, hide_rating, hide_achievements, hide_dashboard, hide_favorites, preferred_language FROM users WHERE id = ?').get(req.user.id);
+  usersRepo.updateMe(req.user.id, u);
+  const user = usersRepo.getMeSettings(req.user.id);
   res.json(user);
 });
 
@@ -117,46 +117,46 @@ router.put('/:id/rating', requireAuth, requireRole('su'), (req, res) => {
   if (typeof rating !== 'number' || !Number.isFinite(rating)) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'rating must be a finite number.' });
   }
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  const user = usersRepo.get(req.params.id);
   if (!user) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'User not found.' });
+    return sendNotFound(res, 'User not found.');
   }
-  db.prepare('UPDATE users SET rating = ?, updated_at = datetime(\'now\') WHERE id = ?').run(Math.round(rating), req.params.id);
+  usersRepo.setRating(req.params.id, Math.round(rating));
   res.json({ message: 'Rating updated.', rating: Math.round(rating) });
 });
 
 router.put('/:id/hide-rating', requireAuth, requireRole('admin'), (req, res) => {
   const { hide_rating } = req.body;
-  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  const target = usersRepo.get(req.params.id);
   if (!target) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'User not found.' });
+    return sendNotFound(res, 'User not found.');
   }
   if (!canManage(req.user, target)) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Cannot modify a user with equal or higher privileges (except yourself).' });
   }
-  db.prepare('UPDATE users SET hide_rating = ?, updated_at = datetime(\'now\') WHERE id = ?').run(hide_rating ? 1 : 0, req.params.id);
+  usersRepo.setHideRating(req.params.id, hide_rating ? 1 : 0);
   res.json({ message: 'Hide rating updated.', hide_rating: hide_rating ? 1 : 0 });
 });
 
 router.put('/:id/submit-lock-exempt', requireAuth, requireRole('su'), (req, res) => {
   const { submit_lock_exempt } = req.body;
-  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  const target = usersRepo.get(req.params.id);
   if (!target) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'User not found.' });
+    return sendNotFound(res, 'User not found.');
   }
-  db.prepare("UPDATE users SET submit_lock_exempt = ?, updated_at = datetime('now') WHERE id = ?").run(submit_lock_exempt ? 1 : 0, req.params.id);
+  usersRepo.setSubmitLockExempt(req.params.id, submit_lock_exempt ? 1 : 0);
   res.json({ message: 'Submit lock exempt updated.', submit_lock_exempt: submit_lock_exempt ? 1 : 0 });
 });
 
 router.put('/:id/upload-limits', requireAuth, requireRole('su'), (req, res) => {
   const { max_file_size, max_storage } = req.body;
-  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  const target = usersRepo.get(req.params.id);
   if (!target) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'User not found.' });
+    return sendNotFound(res, 'User not found.');
   }
   const fileSize = (typeof max_file_size === 'number' && max_file_size >= 0) ? Math.floor(max_file_size) : 0;
   const storage = (typeof max_storage === 'number' && max_storage >= 0) ? Math.floor(max_storage) : 0;
-  db.prepare("UPDATE users SET max_file_size = ?, max_storage = ?, updated_at = datetime('now') WHERE id = ?").run(fileSize, storage, req.params.id);
+  usersRepo.setUploadLimits(req.params.id, fileSize, storage);
   res.json({ message: 'Upload limits updated.', max_file_size: fileSize, max_storage: storage });
 });
 
@@ -175,15 +175,15 @@ router.get('/', requireAuth, requireRole('admin'), (req, res) => {
     where += ' AND role = ?';
     params.push(role);
   }
-  const total = db.prepare(`SELECT COUNT(*) as c FROM users ${where}`).get(...params).c;
-  const users = db.prepare(`SELECT id, username, nickname, email, role, banned, rating, hide_rating, created_at FROM users ${where} ORDER BY id LIMIT ? OFFSET ?`).all(...params, limitNum, offset);
+  const total = usersRepo.countUsers(where, params);
+  const users = usersRepo.listUsers(where, params, limitNum, offset);
   res.json({ total, page: pageNum, limit: limitNum, users });
 });
 
 router.get('/:id', requireAuth, requireRole('admin'), (req, res) => {
-  const user = db.prepare('SELECT id, username, nickname, role, banned, created_at, updated_at FROM users WHERE id = ?').get(req.params.id);
+  const user = usersRepo.getAdmin(req.params.id);
   if (!user) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'User not found.' });
+    return sendNotFound(res, 'User not found.');
   }
   res.json(user);
 });
@@ -193,9 +193,9 @@ router.put('/:id/role', requireAuth, requireRole('su'), (req, res) => {
   if (!isValidRole(role)) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'Invalid role.' });
   }
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  const user = usersRepo.get(req.params.id);
   if (!user) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'User not found.' });
+    return sendNotFound(res, 'User not found.');
   }
   if (user.id === req.user.id) {
     return res.status(400).json({ code: 2, reason: 'ERR_INVALID_STATE', message: 'Cannot change your own role.' });
@@ -203,50 +203,47 @@ router.put('/:id/role', requireAuth, requireRole('su'), (req, res) => {
   if (user.role === 'su' && role !== 'su') {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Cannot demote another super administrator.' });
   }
-  db.prepare('UPDATE users SET role = ?, updated_at = datetime(\'now\') WHERE id = ?').run(role, req.params.id);
+  usersRepo.setRole(req.params.id, role);
   audit(req.user, 'change-role', { ...user, username: user.username, id: user.id });
   res.json({ message: 'Role updated.', user: { id: user.id, username: user.username, role } });
 });
 
 router.post('/:id/ban', requireAuth, requireRole('admin'), (req, res) => {
-  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  const target = usersRepo.get(req.params.id);
   if (!target) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'User not found.' });
+    return sendNotFound(res, 'User not found.');
   }
   if (!canManage(req.user, target)) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Cannot ban a user with equal or higher privileges (except yourself).' });
   }
-  db.prepare('UPDATE users SET banned = 1, updated_at = datetime(\'now\') WHERE id = ?').run(target.id);
-  db.prepare("UPDATE users SET force_logout_at = datetime('now') WHERE id = ?").run(target.id);
-  db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(target.id);
+  usersRepo.ban(target.id);
   audit(req.user, 'ban', target);
   res.json({ message: 'User banned and logged out.' });
 });
 
 router.post('/:id/unban', requireAuth, requireRole('admin'), (req, res) => {
-  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  const target = usersRepo.get(req.params.id);
   if (!target) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'User not found.' });
+    return sendNotFound(res, 'User not found.');
   }
   // 与 force-logout / ban 保持一致：管理员不得解封同级或更高权限的账号（su 账号）
   if (!canManage(req.user, target)) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Cannot unban a user with equal or higher privileges (except yourself).' });
   }
-  db.prepare('UPDATE users SET banned = 0, updated_at = datetime(\'now\') WHERE id = ?').run(target.id);
+  usersRepo.unban(target.id);
   audit(req.user, 'unban', target);
   res.json({ message: 'User unbanned.' });
 });
 
 router.post('/:id/force-logout', requireAuth, requireRole('admin'), (req, res) => {
-  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  const target = usersRepo.get(req.params.id);
   if (!target) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'User not found.' });
+    return sendNotFound(res, 'User not found.');
   }
   if (!canManage(req.user, target)) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Cannot force logout a user with equal or higher privileges (except yourself).' });
   }
-  db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(target.id);
-  db.prepare("UPDATE users SET force_logout_at = datetime('now') WHERE id = ?").run(target.id);
+  usersRepo.forceLogout(target.id);
   audit(req.user, 'force-logout', target);
   res.json({ message: 'User forced to logout.' });
 });
@@ -257,15 +254,12 @@ router.post('/:id/reset-password', requireAuth, requireRole('su'), (req, res) =>
   if (!isStrongPassword(new_password)) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '密码至少 8 位，且须包含字母与数字或符号。' });
   }
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  const user = usersRepo.get(req.params.id);
   if (!user) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'User not found.' });
+    return sendNotFound(res, 'User not found.');
   }
   const hash = bcrypt.hashSync(new_password, 10);
-  db.prepare('UPDATE users SET password_hash = ?, updated_at = datetime(\'now\') WHERE id = ?').run(hash, req.params.id);
-  db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(user.id);
-  // 与 force-logout 一致：否则已签发的 access token 在过期前仍可用旧密码继续操作
-  db.prepare("UPDATE users SET force_logout_at = datetime('now') WHERE id = ?").run(user.id);
+  usersRepo.resetPassword(req.params.id, hash);
   audit(req.user, 'reset-password', user);
   res.json({ message: 'Password reset successfully.' });
 });
@@ -275,9 +269,9 @@ router.post('/sudo-login', requireAuth, requireRole('su'), (req, res) => {
   if (!user_id) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'user_id is required.' });
   }
-  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(user_id);
+  const target = usersRepo.get(user_id);
   if (!target) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'User not found.' });
+    return sendNotFound(res, 'User not found.');
   }
   // 封禁用户不允许 sudo 登录，防止绕过封禁
   if (target.banned) {
@@ -304,59 +298,46 @@ router.post('/', requireAuth, requireRole('su'), (req, res) => {
   if (role && !isValidRole(role)) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'Invalid role.' });
   }
-  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+  const existing = usersRepo.findUserByUsername(username);
   if (existing) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'Username already exists.' });
   }
   const hash = bcrypt.hashSync(password, 10);
-  const newId = db.findNextId('users');
-  db.prepare('INSERT INTO users (id, username, password_hash, nickname, role) VALUES (?, ?, ?, ?, ?)').run(newId, username, hash, nickname || username, role || 'user');
+  const newId = usersRepo.createUser(username, hash, nickname || username, role || 'user');
   res.status(201).json({ message: 'User created.', user: { id: newId, username, role: role || 'user' } });
 });
 
 router.delete('/:id', requireAuth, requireRole('su'), (req, res) => {
-  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  const target = usersRepo.get(req.params.id);
   if (!target) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'User not found.' });
+    return sendNotFound(res, 'User not found.');
   }
   // D-L7: 同级（su）不可互删，仅可管理严格低级别
   if (!canManage(req.user, target)) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Cannot delete a user with equal or higher privileges.' });
   }
   if (target.role === 'su') {
-    const suCount = db.prepare("SELECT COUNT(*) as c FROM users WHERE role = 'su'").get().c;
+    const suCount = usersRepo.countSuperAdmins();
     if (suCount <= 1) {
       return res.status(400).json({ code: 2, reason: 'ERR_INVALID_STATE', message: 'Cannot delete the last super administrator.' });
     }
   }
-  db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(target.id);
-  // 清理该用户作为作者/创建者的依赖数据（FK 已开启，需在删除前处理，避免 500）
-  db.prepare('DELETE FROM discussion_replies WHERE author_id = ?').run(target.id);
-  db.prepare('DELETE FROM discussions WHERE author_id = ?').run(target.id);
-  db.prepare('DELETE FROM articles WHERE author_id = ?').run(target.id); // problem_solutions 级联
-  db.prepare('DELETE FROM announcements WHERE author_id = ?').run(target.id);
-  db.prepare('DELETE FROM problem_sets WHERE creator_id = ?').run(target.id); // items/progress 级联
-  db.prepare('UPDATE problems SET created_by = NULL WHERE created_by = ?').run(target.id);
-  db.prepare('UPDATE contests SET created_by = NULL WHERE created_by = ?').run(target.id);
-  // 清理试卷系统关联数据（exams.creator_id 无 CASCADE 且为 NOT NULL）
-  db.prepare('DELETE FROM exam_answers WHERE submission_id IN (SELECT id FROM exam_submissions WHERE exam_id IN (SELECT id FROM exams WHERE creator_id = ?) OR user_id = ?)').run(target.id, target.id);
-  db.prepare('DELETE FROM exam_submissions WHERE exam_id IN (SELECT id FROM exams WHERE creator_id = ?) OR user_id = ?').run(target.id, target.id);
-  db.prepare('DELETE FROM exam_questions WHERE exam_id IN (SELECT id FROM exams WHERE creator_id = ?)').run(target.id);
-  db.prepare('DELETE FROM exams WHERE creator_id = ?').run(target.id);
-  db.prepare('DELETE FROM submissions WHERE user_id = ?').run(target.id); // submission_details 级联
-  // R9-20: 删用户时清理其上传到磁盘的文件（uploaded_files 是 SET NULL，只删行会留孤儿文件）
+  // R9-20: 先取待删文件清单（读操作留在路由层、位于事务之前）；磁盘删除挪到事务提交之后
+  //（DB 原子性优先，单个文件删失败只留磁盘孤儿）
   const uploadDir = path.join(__dirname, '../../data/uploads');
-  const files = db.prepare('SELECT filename FROM uploaded_files WHERE user_id = ?').all(target.id);
+  const files = usersRepo.listUserFiles(target.id);
+
+  // 18 条连删的原子事务整体封装在 repositories/users.js 的 deleteUserCascade 中
+  usersRepo.deleteUserCascade(target);
+
   for (const f of files) {
     try {
       const fp = path.resolve(uploadDir, path.basename(String(f.filename)));
       if (fp.startsWith(uploadDir) && fs.existsSync(fp)) fs.unlinkSync(fp);
-    } catch {}
+    } catch {
+      // 磁盘清理尽力而为：事务已提交，失败仅留孤儿文件
+    }
   }
-  db.prepare('DELETE FROM uploaded_files WHERE user_id = ?').run(target.id);
-  // 10.3: 清理该用户邮箱的验证码记录（防止遗留隐私数据）
-  if (target.email) db.prepare('DELETE FROM email_codes WHERE email = ?').run(target.email);
-  db.prepare('DELETE FROM users WHERE id = ?').run(target.id);
   audit(req.user, 'delete-user', target);
   res.json({ message: 'User deleted.' });
 });

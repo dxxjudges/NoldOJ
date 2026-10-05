@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config/config');
 const db = require('../database/db');
+const { logInfo } = require('../utils/logger');
 
 let io = null;
 
@@ -88,7 +89,7 @@ function initSocket(server) {
     });
   });
 
-  console.log('[Socket] Socket.io initialized');
+  logInfo('Socket', 'Socket.io initialized');
   return io;
 }
 

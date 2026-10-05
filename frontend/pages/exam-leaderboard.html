@@ -20,7 +20,7 @@
     <div id="board" class="hidden">
       <div id="head" class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm dark:shadow-gray-900/30 border border-gray-100 dark:border-gray-700 p-6 mb-6"></div>
       <div id="mine" class="hidden mb-6"></div>
-      <div id="rows" class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm dark:shadow-gray-900/30 border border-gray-100 dark:border-gray-700 overflow-hidden"></div>
+      <div id="rows" aria-live="polite" class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm dark:shadow-gray-900/30 border border-gray-100 dark:border-gray-700 overflow-hidden"></div>
     </div>
   </div>
   <script>
@@ -163,7 +163,7 @@
           : { manual_frozen: false, unfrozen: true });
         await load();
       } catch (err) {
-        alert(err.message || '操作失败');
+        showToast(err.message || '操作失败', 'error');
       }
     }
 
@@ -172,7 +172,7 @@
         await apiCall('PUT', `/exams/${eid}`, { unfrozen: v });
         await load();
       } catch (err) {
-        alert(err.message || '操作失败');
+        showToast(err.message || '操作失败', 'error');
       }
     }
 

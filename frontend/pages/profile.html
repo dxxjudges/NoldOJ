@@ -19,7 +19,7 @@
   <div id="nav"></div>
   <div class="max-w-3xl mx-auto px-4 py-8">
     <h1 id="pageTitle" class="text-2xl font-bold text-gray-900 dark:text-white mb-6">个人资料</h1>
-    <div id="profile" class="text-center py-8 text-gray-400 dark:text-gray-500 dark:text-gray-400">加载中...</div>
+    <div id="profile" aria-live="polite" class="text-center py-8 text-gray-400 dark:text-gray-500 dark:text-gray-400">加载中...</div>
   </div>
   <script>
     document.getElementById('nav').innerHTML = renderNav('');
@@ -108,15 +108,15 @@
             <h3 class="font-semibold text-gray-900 dark:text-white mb-4">编辑资料</h3>
             <div class="space-y-4">
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">昵称</label>
+                <label for="edNickname" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">昵称</label>
                 <input id="edNickname" value="${escapeHtml(u.nickname || '')}" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-800 dark:text-white">
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">个性签名 <span class="text-xs text-gray-400 dark:text-gray-500 dark:text-gray-400">（最多1000字，支持 D("内容") 动态签名）</span></label>
+                <label for="edSignature" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">个性签名 <span class="text-xs text-gray-400 dark:text-gray-500 dark:text-gray-400">（最多1000字，支持 D("内容") 动态签名）</span></label>
                 <textarea id="edSignature" rows="2" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl font-mono text-sm text-left focus:ring-2 focus:ring-indigo-500 outline-none resize-none dark:bg-gray-800 dark:text-white">${escapeHtml(u.signature || '')}</textarea>
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">个人简介 <span class="text-xs text-gray-400 dark:text-gray-500 dark:text-gray-400">（支持 Markdown 和 KaTeX 公式）</span></label>
+                <label for="edBio" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">个人简介 <span class="text-xs text-gray-400 dark:text-gray-500 dark:text-gray-400">（支持 Markdown 和 KaTeX 公式）</span></label>
                 <textarea id="edBio" rows="6" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl font-mono text-sm text-left focus:ring-2 focus:ring-indigo-500 outline-none resize-none dark:bg-gray-800 dark:text-white" placeholder="# 关于我&#10;&#10;支持 **Markdown** 和 $E=mc^2$ 公式">${escapeHtml(u.bio || '')}</textarea>
               </div>
               <div class="flex items-center space-x-2">
@@ -141,7 +141,7 @@
                 </div>
               </div>
               <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">偏好语言</label>
+                <label for="edPrefLang" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">偏好语言</label>
                 <select id="edPrefLang" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-800 dark:text-white">
                   <option value="">不设置</option>
                   <option value="c">C</option>
@@ -184,9 +184,9 @@
         });
         const user = getUser();
         if (user) { user.preferred_language = prefLang; setUser(user); }
-        alert('资料已保存');
+        showToast('资料已保存', 'success');
         loadProfile();
-      } catch (err) { alert(err.message); }
+      } catch (err) { showToast(err.message, 'error'); }
     }
 
     function copyBioMarkdown(btn) {

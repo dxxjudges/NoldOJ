@@ -22,21 +22,21 @@
         <h1 class="text-3xl font-bold text-gray-900 dark:text-white">欢迎回来</h1>
         <p class="text-gray-500 dark:text-gray-400 mt-2">登录你的 NoldOJ 账户</p>
       </div>
-      <div id="error" class="hidden mb-4 px-4 py-3 border-2 border-red-400 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-xl text-sm font-medium"></div>
+<div id="error" role="alert" class="hidden mb-4 px-4 py-3 border-2 border-red-400 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-xl text-sm font-medium"></div>
       <form onsubmit="handleLogin(event)">
         <div class="mb-4">
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">用户名</label>
+          <label for="username" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">用户名</label>
           <input id="username" type="text" required class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition dark:bg-gray-700 dark:text-white" placeholder="请输入用户名">
         </div>
         <div class="mb-4">
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">密码</label>
+          <label for="password" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">密码</label>
           <input id="password" type="password" required class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition dark:bg-gray-700 dark:text-white" placeholder="请输入密码">
         </div>
         <div id="captchaSection" class="mb-4 hidden">
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">验证码</label>
+          <label for="captchaCode" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">验证码</label>
           <div class="flex space-x-2">
             <input id="captchaCode" type="text" minlength="4" maxlength="4" class="flex-1 px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition dark:bg-gray-700 dark:text-white uppercase" placeholder="请输入验证码">
-            <div id="captchaImg" class="captcha-svg cursor-pointer border border-gray-300 dark:border-gray-600 rounded-xl overflow-hidden hover:opacity-80 transition flex items-center justify-center" title="点击刷新验证码" style="min-width:130px;"></div>
+            <div id="captchaImg" aria-label="验证码图片，点击可刷新" class="captcha-svg cursor-pointer border border-gray-300 dark:border-gray-600 rounded-xl overflow-hidden hover:opacity-80 transition flex items-center justify-center" title="点击刷新验证码" style="min-width:130px;"></div>
           </div>
         </div>
         <button type="submit" id="loginBtn" class="w-full py-2.5 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700 transition">登 录</button>

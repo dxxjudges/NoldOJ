@@ -445,7 +445,7 @@ abs(@score - 50)</code></pre>
     <!-- ═══ 4. 运维 ═══ -->
     <div class="section" id="ops">
       <h2 class="sec-title"><span class="n">4</span>配置与运维</h2>
-      <p class="sec-desc">配置以 config/ 目录下的配置文件为主；另有 PORT、DB_PATH、COOKIE_SECURE、SANDBOX_TEMP、NoldOJ_PROBLEMS_DIR、NoldOJ_JUDGE_THREADS、TRUST_PROXY、OJ_LOG_DIR、NoldOJ_REQUIRE_RUNNER 等环境变量可覆盖部署行为（测试/CI 专用变量见 wiki 配置说明）。</p>
+      <p class="sec-desc">配置以 config/ 目录下的配置文件为主；另有 PORT、DB_PATH、COOKIE_SECURE、SANDBOX_TEMP、NoldOJ_PROBLEMS_DIR、NoldOJ_JUDGE_THREADS、TRUST_PROXY、OJ_LOG_DIR、NoldOJ_ALLOW_NO_SANDBOX 等环境变量可覆盖部署行为（测试/CI 专用变量见 wiki 配置说明）。</p>
 
       <h3 class="block" id="config">配置文件</h3>
       <div class="notice info">
@@ -517,13 +517,13 @@ abs(@score - 50)</code></pre>
           <pre><code>cd backend\sandbox
 build.bat</code></pre>
         </div>
-        <p>start.bat 每次启动都会从 <code>sandbox_runner.cpp</code> 重新编译（需 g++）；编译不可用时回退到传统模式（spawn），安全性较低。可用以下环境变量控制沙箱行为：</p>
+        <p>start.bat 每次启动都会从 <code>sandbox_runner.cpp</code> 重新编译（需 g++）；编译不可用且无已有 exe 时 Windows 判题 fail-closed 拒绝执行（显式设 <code>NoldOJ_ALLOW_NO_SANDBOX=1</code> 才回退传统模式 spawn，不安全）。可用以下环境变量控制沙箱行为：</p>
       </div>
       <div class="table-wrap">
         <table>
           <thead><tr><th>环境变量</th><th>默认</th><th>作用</th></tr></thead>
           <tbody>
-            <tr><td><code>NoldOJ_REQUIRE_RUNNER</code></td><td>0</td><td>=1 时沙箱运行器缺失即 fail-closed 拒绝判题</td></tr>
+            <tr><td><code>NoldOJ_ALLOW_NO_SANDBOX</code></td><td>0</td><td>Windows 缺沙箱运行器时 =1 才允许回退传统裸跑（不安全，仅限本地开发）；默认 fail-closed 拒绝判题</td></tr>
             <tr><td><code>NoldOJ_NO_APPCONTAINER</code></td><td>0</td><td>=1 完全跳过 AppContainer 容器路径</td></tr>
             <tr><td><code>NoldOJ_FORCE_CONTAINER</code></td><td>0</td><td>=1 无特权也尝试容器路径（仅管理员排查用）</td></tr>
             <tr><td><code>NoldOJ_EXEC_MODE</code></td><td>0</td><td>0/1 受限令牌+Low IL；2 裸进程（诊断）；3 受限令牌不带 CREATE_NO_WINDOW</td></tr>
@@ -590,11 +590,11 @@ build.bat</code></pre>
       </details>
       <details>
         <summary>内存显示 0KB？</summary>
-        <p>沙箱模式下内存由 Job Object 测量；回退模式（无 <code>sandbox_runner.exe</code>）在 Windows 上每 150ms 用 <code>tasklist</code> 轮询内存、超限即杀（标记 <code>MEMORY_LIMIT</code>）。若显示 0KB，通常是非 Windows 回退或 <code>tasklist</code> 无采样（进程过早退出），不代表回退模式不测内存。确认 <code>backend/sandbox/sandbox_runner.exe</code> 存在（start.bat 每次启动都会从源码重新编译，需 g++），或手动运行 <code>cd backend\sandbox &amp;&amp; build.bat</code>。</p>
+        <p>沙箱模式下内存由 Job Object 测量；回退模式（非 Windows 平台，或显式 <code>NoldOJ_ALLOW_NO_SANDBOX=1</code> 且无运行器）在 Windows 上每 150ms 用 <code>tasklist</code> 轮询内存、超限即杀（标记 <code>MEMORY_LIMIT</code>）。若显示 0KB，通常是非 Windows 回退或 <code>tasklist</code> 无采样（进程过早退出），不代表回退模式不测内存。确认 <code>backend/sandbox/sandbox_runner.exe</code> 存在（start.bat 每次启动都会从源码重新编译，需 g++），或手动运行 <code>cd backend\sandbox &amp;&amp; build.bat</code>。</p>
       </details>
       <details>
         <summary>提示「安全沙箱运行器缺失」？</summary>
-        <p>设置了 <code>NoldOJ_REQUIRE_RUNNER=1</code> 且 <code>sandbox_runner.exe</code> 不存在时会 fail-closed 拒绝判题。编译运行器或取消该环境变量即可。</p>
+        <p>Windows 下 <code>sandbox_runner.exe</code> 不存在时默认 fail-closed 拒绝判题（该提示即来自此保护）。请运行 <code>cd backend\sandbox &amp;&amp; build.bat</code> 编译；本地开发确需无沙箱运行可显式设 <code>NoldOJ_ALLOW_NO_SANDBOX=1</code>（不安全）。</p>
       </details>
       <details>
         <summary>非管理员运行 node 进程，判题会失败吗？</summary>

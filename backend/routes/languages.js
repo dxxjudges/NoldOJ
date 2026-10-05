@@ -1,13 +1,15 @@
 const express = require('express');
-const db = require('../database/db');
+const languagesRepo = require('../repositories/languages');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { buildUpdates } = require('../utils/db');
+
+const { sendNotFound } = require('../utils/apiErrors');
 
 const router = express.Router();
 
 router.get('/', (req, res) => {
   // 公开接口只暴露非敏感字段，不泄露 compile_cmd/run_cmd
-  const languages = db.prepare('SELECT id, name, display_name, extension, is_enabled FROM languages ORDER BY id').all();
+  const languages = languagesRepo.listLanguages();
   res.json(languages);
 });
 
@@ -16,19 +18,19 @@ router.post('/', requireAuth, requireRole('su'), (req, res) => {
   if (!name || !display_name || !run_cmd || !extension) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'name, display_name, run_cmd, and extension are required.' });
   }
-  const existing = db.prepare('SELECT id FROM languages WHERE name = ?').get(name);
+  const existing = languagesRepo.findByName(name);
   if (existing) {
     return res.status(409).json({ code: 2, reason: 'ERR_CONFLICT', message: 'Language already exists.' });
   }
-  const result = db.prepare('INSERT INTO languages (name, display_name, compile_cmd, run_cmd, extension) VALUES (?, ?, ?, ?, ?)').run(name, display_name, compile_cmd || '', run_cmd, extension);
-  const lang = db.prepare('SELECT * FROM languages WHERE id = ?').get(result.lastInsertRowid);
+  const result = languagesRepo.insertLanguage(name, display_name, compile_cmd, run_cmd, extension);
+  const lang = languagesRepo.findById(result.lastInsertRowid);
   res.status(201).json(lang);
 });
 
 router.put('/:id', requireAuth, requireRole('su'), (req, res) => {
-  const lang = db.prepare('SELECT * FROM languages WHERE id = ?').get(req.params.id);
+  const lang = languagesRepo.findById(req.params.id);
   if (!lang) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Language not found.' });
+    return sendNotFound(res, 'Language not found.');
   }
   const { name, display_name, compile_cmd, run_cmd, extension, is_enabled } = req.body;
   const u = buildUpdates([
@@ -43,17 +45,17 @@ router.put('/:id', requireAuth, requireRole('su'), (req, res) => {
   if (u.count === 0) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'No fields to update.' });
   }
-  db.prepare(`UPDATE languages SET ${u.clause} WHERE id = ?`).run(...u.values, lang.id);
-  const updated = db.prepare('SELECT * FROM languages WHERE id = ?').get(lang.id);
+  languagesRepo.updateLanguage(lang.id, u);
+  const updated = languagesRepo.findById(lang.id);
   res.json(updated);
 });
 
 router.delete('/:id', requireAuth, requireRole('su'), (req, res) => {
-  const lang = db.prepare('SELECT * FROM languages WHERE id = ?').get(req.params.id);
+  const lang = languagesRepo.findById(req.params.id);
   if (!lang) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'Language not found.' });
+    return sendNotFound(res, 'Language not found.');
   }
-  db.prepare('DELETE FROM languages WHERE id = ?').run(lang.id);
+  languagesRepo.deleteLanguage(lang.id);
   res.json({ message: 'Language deleted.' });
 });
 

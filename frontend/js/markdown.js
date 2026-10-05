@@ -75,7 +75,7 @@ function renderMarkdown(text) {
     t = t.replace(/@\[echarts\]\((.+)\)/g, (_, json) => {
       const raw = json.trim().replace(/\)+$/, '');
       let cfg = null;
-      try { cfg = JSON.parse(raw); } catch (e) { cfg = null; }
+      try { cfg = JSON.parse(raw); } catch { /* 抛错时 cfg 保持 null */ }
       if (!cfg || typeof cfg !== 'object') return stash('<pre class="my-3 bg-gray-100 dark:bg-gray-800 rounded-lg p-3 text-sm overflow-x-auto text-gray-700 dark:text-gray-300">' + escapeHtml('[echarts] JSON 配置无效:\n' + raw.slice(0, 2000)) + '</pre>');
       return stash('<div class="my-4 oj-echarts" data-config="' + escapeHtml(JSON.stringify(cfg)) + '"><div class="oj-echarts-loading text-sm text-gray-400 dark:text-gray-500 py-16 text-center">图表加载中…</div></div>');
     });
@@ -264,7 +264,7 @@ function renderMarkdown(text) {
     out = out.replace(/\uE000I(\d+)\uE001/g, (_, i) => (italics[+i] !== undefined ? sanitizeHtml(italics[+i]) : ''));
     out = out.replace(/\uE000(\d+)\uE001/g, (_, i) => (embeds[+i] !== undefined ? embeds[+i] : ''));
     return `<div class="prose prose-sm dark:prose-invert max-w-none text-left text-gray-700 dark:text-gray-200 leading-relaxed">${out}</div>`;
-  } catch (e) {
+  } catch {
     return `<pre class="text-sm text-gray-700 dark:text-gray-200">${escapeHtml(text)}</pre>`;
   }
 }
@@ -278,7 +278,6 @@ function renderMarkdown(text) {
     else return;
   } else boot();
 
-  var loaded = {};
   function ensureLib(src, check, cb) {
     if (check()) { cb(); return; }
     var s = document.querySelector('script[data-oj-lib="' + src + '"]');
@@ -302,7 +301,7 @@ function renderMarkdown(text) {
     var raw = el.getAttribute('data-config');
     if (!raw) return;
     var cfg = null;
-    try { cfg = JSON.parse(raw); } catch (e) { cfg = null; }
+    try { cfg = JSON.parse(raw); } catch { cfg = null; }
     if (!cfg) { failNode(el, '图表配置解析失败'); return; }
     ensureLib(
       '/js/echarts.min.js',
@@ -317,7 +316,7 @@ function renderMarkdown(text) {
           var chart = window.echarts.init(el);
           chart.setOption(cfg);
           window.addEventListener('resize', function () { chart.resize(); });
-        } catch (e) {
+        } catch {
           failNode(el, '图表渲染失败');
         }
       }

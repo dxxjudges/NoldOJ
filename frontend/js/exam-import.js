@@ -110,12 +110,12 @@
     const s = String(raw == null ? '' : raw).trim().toLowerCase();
     if (!s) return null;
     if (TYPE_ALIAS[s]) return TYPE_ALIAS[s];
-    return TYPE_ALIAS[s.replace(/[\s_\-]/g, '')] || null;
+    return TYPE_ALIAS[s.replace(/[\s_-]/g, '')] || null;
   }
 
   function parseChoiceAnswer(raw) {
     const s = String(raw == null ? '' : raw).trim()
-      .replace(/^[（(【\[\s.、:：]+/, '')
+      .replace(/^[[（(【\s.、:：]+/, '')
       .replace(/[）)】\]\s]+$/, '');
     if (!s) return { error: '正确答案为空' };
     const letters = s.toUpperCase().match(/[A-Z]/g) || [];
@@ -191,7 +191,7 @@
       }
 
       const rawAnswer = cell(row, map.answer);
-      let correct = '';
+      let correct;
       if (type === 'choice') {
         let parsed = parseChoiceAnswer(rawAnswer);
         if (parsed.error) {

@@ -3,9 +3,11 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
-const db = require('../database/db');
+const uploadsRepo = require('../repositories/uploads');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { parsePageLimit } = require('../utils/pagination');
+
+const { sendNotFound } = require('../utils/apiErrors');
 
 const router = express.Router();
 
@@ -55,7 +57,9 @@ function verifyMagicBytes(filePath, ext) {
   } catch {
     return false;
   } finally {
-    if (fd !== undefined) { try { fs.closeSync(fd); } catch {} }
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* 句柄可能已被释放，关闭失败可忽略 */ }
+    }
   }
 }
 
@@ -74,12 +78,8 @@ const upload = multer({
 router.get('/', requireAuth, requireRole('teacher'), (req, res) => {
   const { page = 1, limit = 50 } = req.query;
   const { page: pageNum, limit: limitNum, offset } = parsePageLimit(page, limit, 50, 100);
-  const total = db.prepare('SELECT COUNT(*) as c FROM uploaded_files').get().c;
-  const files = db.prepare(`
-    SELECT f.*, u.username
-    FROM uploaded_files f LEFT JOIN users u ON f.user_id = u.id
-    ORDER BY f.id DESC LIMIT ? OFFSET ?
-  `).all(limitNum, offset);
+  const total = uploadsRepo.countFiles();
+  const files = uploadsRepo.listFiles(limitNum, offset);
   res.json({ total, page: pageNum, limit: limitNum, files });
 });
 
@@ -89,7 +89,7 @@ router.post('/', requireAuth, requireRole('teacher'), upload.single('file'), (re
   }
 
   // 获取用户自定义限制
-  const user = db.prepare('SELECT max_file_size, max_storage FROM users WHERE id = ?').get(req.user.id);
+  const user = uploadsRepo.getUserUploadLimits(req.user.id);
   const maxFileSize = (user?.max_file_size > 0) ? user.max_file_size : DEFAULT_MAX_FILE_SIZE;
   const maxStorage = (user?.max_storage > 0) ? user.max_storage : DEFAULT_MAX_STORAGE;
 
@@ -100,7 +100,7 @@ router.post('/', requireAuth, requireRole('teacher'), upload.single('file'), (re
   }
 
   // 检查用户总存储限制
-  const userSize = db.prepare('SELECT COALESCE(SUM(size), 0) as total FROM uploaded_files WHERE user_id = ?').get(req.user.id).total;
+  const userSize = uploadsRepo.getUserUsedStorage(req.user.id);
   if (userSize + req.file.size > maxStorage) {
     fs.unlinkSync(req.file.path);
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: `文件总大小超过限制 (${(maxStorage / 1024 / 1024 / 1024).toFixed(1)}GB)。` });
@@ -113,7 +113,7 @@ router.post('/', requireAuth, requireRole('teacher'), upload.single('file'), (re
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '文件内容与扩展名不匹配，疑似伪装文件。' });
   }
 
-  db.prepare('INSERT INTO uploaded_files (user_id, filename, original_name, mime_type, size) VALUES (?, ?, ?, ?, ?)').run(
+  uploadsRepo.insertFile(
     req.user.id, req.file.filename, req.file.originalname, req.file.mimetype, req.file.size
   );
   const url = `/uploads/${req.file.filename}`;
@@ -130,7 +130,7 @@ function safePath(filename) {
 router.get('/:filename', requireAuth, (req, res) => {
   const filePath = safePath(req.params.filename);
   if (!filePath || !fs.existsSync(filePath)) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'File not found.' });
+    return sendNotFound(res, 'File not found.');
   }
   // 强制下载，避免浏览器内联渲染（如 HTML/SVG 触发 XSS）；
   // filename 转义引号，防止响应头注入
@@ -140,13 +140,13 @@ router.get('/:filename', requireAuth, (req, res) => {
 });
 
 router.delete('/:id', requireAuth, requireRole('admin'), (req, res) => {
-  const file = db.prepare('SELECT * FROM uploaded_files WHERE id = ?').get(req.params.id);
+  const file = uploadsRepo.getFile(req.params.id);
   if (!file) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'File not found.' });
+    return sendNotFound(res, 'File not found.');
   }
   const filePath = path.join(uploadDir, file.filename);
-  try { fs.unlinkSync(filePath); } catch {}
-  db.prepare('DELETE FROM uploaded_files WHERE id = ?').run(file.id);
+  try { fs.unlinkSync(filePath); } catch { /* 磁盘删除尽力而为，DB 记录仍会删除 */ }
+  uploadsRepo.deleteFile(file.id);
   res.json({ message: 'File deleted.' });
 });
 

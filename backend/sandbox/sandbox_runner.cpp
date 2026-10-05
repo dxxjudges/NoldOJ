@@ -538,6 +538,19 @@ static std::wstring baseNameW(const std::wstring& p) {
     return pos == std::wstring::npos ? p : p.substr(pos + 1);
 }
 
+// 真实 workDir = 本进程当前目录（executor.js runCodeSandboxed 以 cwd=workDir 启动本程序，
+// 且本文件所有 CreateProcess 调用 lpCurrentDirectory 均为 NULL，继承该 cwd）。
+// 禁止用 dirName(metaFile) 当 workDir：metaFile 位于 tempDir 根、是 workDir 的兄弟位置，
+// 以它为准会把 metaFile 与并发提交的其他临时目录一并降标/授权，推翻
+// "判题元数据放在 workDir 之外防伪造"的设计——低完整性子进程即可改写 _meta.json
+// 把 TLE/MLE/RE 伪造成 AC，并与并发提交互相可见。
+static std::wstring workDirFromCwd() {
+    WCHAR buf[MAX_PATH * 4];
+    DWORD n = GetCurrentDirectoryW(MAX_PATH * 4, buf);
+    if (n == 0 || n >= MAX_PATH * 4) return L"";
+    return std::wstring(buf, n);
+}
+
 // 收集 path 到磁盘根的全部祖先目录（含叶子本身与磁盘根）
 static void collectAncestors(const std::wstring& path, std::vector<std::wstring>& out) {
     std::wstring cur = path;
@@ -839,6 +852,33 @@ int main(int argc, char* argv[]) {
     const char* metaFile = argv[argOffset + 3];
     const char* exePath  = argv[argOffset + 4];
 
+    // 真实 workDir 取当前目录（见 workDirFromCwd 注释），一次性解析供后续
+    // Low IL 降标与 AppContainer 授权使用。
+    const std::wstring workDirW = workDirFromCwd();
+    if (workDirW.empty()) {
+        writeMeta(metaFile, -1, 0, 0, "SYSTEM_ERROR");
+        sandboxLog("GetCurrentDirectoryW failed; cannot determine workDir");
+        return 1;
+    }
+    // 安全自检：metaFile 绝不能位于 workDir 内（否则 workDir 降为 Low IL 后
+    // 子进程可直接改写元数据伪造判题结果）。命中即拒绝执行。
+    {
+        std::wstring mf = utf8ToWide(metaFile);
+        auto lower = [](std::wstring s) {
+            for (size_t i = 0; i < s.size(); i++) s[i] = (wchar_t)towlower(s[i]);
+            return s;
+        };
+        std::wstring ml = lower(mf), wl = lower(workDirW);
+        bool inside = (ml.size() == wl.size() && ml == wl) ||
+                      (ml.size() > wl.size() && ml.rfind(wl, 0) == 0 &&
+                       (ml[wl.size()] == L'\\' || ml[wl.size()] == L'/'));
+        if (inside) {
+            writeMeta(metaFile, -1, 0, 0, "SYSTEM_ERROR");
+            sandboxLog("SECURITY: metaFile is inside workDir; refusing to run (result forgery risk)");
+            return 1;
+        }
+    }
+
     // 构建命令行（D-L13：标准 CRT 转义，正确处理反斜杠+引号组合）
     std::string cmdLine;
     for (int i = argOffset + 4; i < argc; i++) {
@@ -1010,7 +1050,6 @@ int main(int argc, char* argv[]) {
     // 文件IO模式下即使使用 AppContainer 也强制降标签，确保进程能写入工作目录
     if ((lowIl && execMode != 2 && !useAppContainer && !noRelabel) || fileIoMode) {
         if (!noRelabel) {
-            std::wstring workDirW = dirNameW(utf8ToWide(metaFile));
             setLowLabelRecursive(workDirW.c_str());
             workDirRelabeled = true;
             sandboxLogW(L"workdir relabeled to LOW integrity: %ls", workDirW.c_str());
@@ -1037,7 +1076,6 @@ int main(int argc, char* argv[]) {
     // 4b. AppContainer 授权：workDir（含祖先 traverse）+ 解释器（读+执行）
     std::vector<std::wstring> aclTouched;
     if (useAppContainer && appSid) {
-        std::wstring workDirW = dirNameW(utf8ToWide(metaFile));
         grantTraverseAncestors(workDirW, appSid, aclTouched);
         grantTreeRecursive(workDirW.c_str(), appSid, FILE_ALL_ACCESS, aclTouched);
 

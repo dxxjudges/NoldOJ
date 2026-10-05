@@ -1,7 +1,9 @@
 const express = require('express');
-const db = require('../database/db');
+const achievementsRepo = require('../repositories/achievements');
 const { requireAuth } = require('../middleware/auth');
 const { canViewUserData } = require('../utils/roles');
+
+const { sendNotFound } = require('../utils/apiErrors');
 
 const router = express.Router();
 
@@ -13,15 +15,15 @@ router.get('/', requireAuth, (req, res) => {
   if (!Number.isInteger(targetId)) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'Invalid user_id.' });
   }
-  const target = db.prepare('SELECT id, hide_achievements FROM users WHERE id = ?').get(targetId);
+  const target = achievementsRepo.getUserAchievementPrivacy(targetId);
   if (!target) {
-    return res.status(404).json({ code: 3, reason: 'ERR_NOT_FOUND', message: 'User not found.' });
+    return sendNotFound(res, 'User not found.');
   }
   if (!canViewUserData(req.user, target, 'hide_achievements')) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: '该用户已对其它用户隐藏成就。' });
   }
-  const all = db.prepare('SELECT * FROM achievements ORDER BY id').all();
-  const mineRows = db.prepare('SELECT achievement_id, unlocked_at FROM user_achievements WHERE user_id = ?').all(targetId);
+  const all = achievementsRepo.listAchievements();
+  const mineRows = achievementsRepo.listUserAchievements(targetId);
   const mineMap = new Map(mineRows.map(r => [r.achievement_id, r.unlocked_at]));
   const total = all.length;
   const unlocked = mineRows.length;
