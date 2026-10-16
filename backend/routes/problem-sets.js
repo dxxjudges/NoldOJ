@@ -1,14 +1,25 @@
 const express = require('express');
 const problemSetsRepo = require('../repositories/problem-sets');
+const { makeVisibilityRouter, visibilityFilterFor, visibilityDeniedMessage, canView } = require('./_visibility');
+const { filterViewableIds } = require('../utils/access');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { parsePageLimit } = require('../utils/pagination');
 const { isStaff, isAdminOrSu } = require('../utils/roles');
 const { buildUpdates } = require('../utils/db');
 
-const { sendNotFound } = require('../utils/apiErrors');
+const { sendNotFound, sendForbidden } = require('../utils/apiErrors');
 const { logError } = require('../utils/logger');
 
 const router = express.Router();
+
+// 实体可见性（用户组维度）：GET/PUT /:id/visibility
+// findResource 用 getRow（整行含 visibility）：get() 只回 { id }，读不到当前可见性
+router.use(makeVisibilityRouter({
+  resourceType: 'problem_set',
+  tableName: 'problem_sets',
+  findResource: problemSetsRepo.getRow,
+  setVisibility: problemSetsRepo.setVisibility
+}));
 
 // 列表（公开题单 + 本人私有题单 + admin/su 全部 + 分页）
 router.get('/', optionalAuth, (req, res) => {
@@ -16,16 +27,23 @@ router.get('/', optionalAuth, (req, res) => {
   const { page: pageNum, limit: sizeNum, offset } = parsePageLimit(page, size, 20, 50);
 
   // 匿名仅公开；登录用户额外可见本人私有题单；admin/su 可见全部
+  // （is_public / creator 两段用括号包住：后续要 AND 可见性条件，OR 优先级更高不加括号会漏过滤）
   const userId = req.user ? req.user.id : null;
   let where;
   let params = [];
   if (userId && isAdminOrSu(req.user.role)) {
     where = '1 = 1';
   } else if (userId) {
-    where = 'ps.is_public = 1 OR ps.creator_id = ?';
+    where = '(ps.is_public = 1 OR ps.creator_id = ?)';
     params = [userId];
   } else {
     where = 'ps.is_public = 1';
+  }
+  // 实体可见性（用户组）：与 canViewResource 口径一致，staff 条件为空 → 不过滤
+  const vis = visibilityFilterFor(req, 'problem_set');
+  if (vis.sql) {
+    where += ` AND (${vis.sql})`;
+    params.push(...vis.params);
   }
 
   const total = problemSetsRepo.countList(where, params);
@@ -58,15 +76,23 @@ router.get('/:id', optionalAuth, (req, res) => {
   if (!ps.is_public && (!req.user || !isAdminOrSu(req.user.role)) && req.user?.id !== ps.creator_id) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'This set is private.' });
   }
+  // 实体可见性（用户组）：visibility='groups' 的题单仅绑定组成员与 staff 可见
+  if (!canView(req, 'problem_set', ps.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('problem set'));
+  }
 
   const problems = problemSetsRepo.listProblems(req.user ? req.user.id : 0, ps.id);
 
+  // 题单内的题目逐题过滤：题单本身可见不代表其中每道题都可见（题目可能单独设为组可见）
+  const viewable = new Set(filterViewableIds('problem', problems.map(p => p.id), req.user));
   let solvedCount = 0;
-  const problemList = problems.map(p => {
-    const solved = p.user_accepted > 0 ? 1 : 0;
-    if (solved) solvedCount++;
-    return { id: p.id, title: p.title, difficulty: p.difficulty, sort_order: p.sort_order, solved };
-  });
+  const problemList = problems
+    .filter(p => viewable.has(p.id))
+    .map(p => {
+      const solved = p.user_accepted > 0 ? 1 : 0;
+      if (solved) solvedCount++;
+      return { id: p.id, title: p.title, difficulty: p.difficulty, sort_order: p.sort_order, solved };
+    });
 
   res.json({
     ...ps,
@@ -78,9 +104,13 @@ router.get('/:id', optionalAuth, (req, res) => {
 
 // 进度查询
 router.get('/:id/progress', requireAuth, (req, res) => {
-  const ps = problemSetsRepo.get(req.params.id);
+  const ps = problemSetsRepo.getRow(req.params.id);
   if (!ps) {
     return sendNotFound(res, 'Problem set not found.');
+  }
+  // 实体可见性（用户组）：进度项含题目 id，组外用户不得读
+  if (!canView(req, 'problem_set', ps.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('problem set'));
   }
   const items = problemSetsRepo.listProgress(req.user.id, ps.id);
   const solved = items.filter(i => i.solved).length;

@@ -1,21 +1,33 @@
 const express = require('express');
 const categoriesRepo = require('../repositories/categories');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, optionalAuth } = require('../middleware/auth');
 const { buildUpdates } = require('../utils/db');
+const { filterViewableIds } = require('../utils/access');
+const { isStaff } = require('../utils/roles');
 
 const { sendNotFound } = require('../utils/apiErrors');
 
 const router = express.Router();
 
-router.get('/', (req, res) => {
+router.get('/', optionalAuth, (req, res) => {
   const categories = categoriesRepo.listCategoriesWithCount();
+  // 实体可见性（用户组）：problem_count 只统计当前用户可见的题目（组可见题的题目数不外泄）
+  if (!(req.user && isStaff(req.user.role))) {
+    for (const cat of categories) {
+      cat.problem_count = filterViewableIds('problem', categoriesRepo.listProblemIds(cat.id), req.user).length;
+    }
+  }
   res.json(categories);
 });
 
-router.get('/:id', (req, res) => {
+router.get('/:id', optionalAuth, (req, res) => {
   const category = categoriesRepo.getCategory(req.params.id);
   if (!category) {
     return sendNotFound(res, 'Category not found.');
+  }
+  // 实体可见性（用户组）：分类本身是元数据，但 problem_count 会暴露组可见题的题目数
+  if (!(req.user && isStaff(req.user.role))) {
+    category.problem_count = filterViewableIds('problem', categoriesRepo.listProblemIds(category.id), req.user).length;
   }
   res.json(category);
 });

@@ -7,7 +7,7 @@
     let adminContestsCache = [];
 
     function showTab(tab) {
-      ['problems','users','articles','files','contests','categories','tags','announcements'].forEach(t => {
+      ['problems','users','groups','articles','files','contests','categories','tags','announcements'].forEach(t => {
         document.getElementById(`panel-${t}`).classList.toggle('hidden', t !== tab);
         const btn = document.getElementById(`tab-${t}`);
         btn.className = t === tab ? 'px-4 py-2 rounded-xl text-sm font-medium bg-indigo-600 text-white' : 'px-4 py-2 rounded-xl text-sm font-medium bg-white border border-gray-300 text-gray-600 hover:bg-gray-50';
@@ -15,6 +15,7 @@
         btn.setAttribute('aria-selected', String(t === tab));
       });
       if (tab === 'users') { loadUsers(); initUserAdminTools(); }
+      if (tab === 'groups') loadUserGroups();
       if (tab === 'articles') loadAdminArticles();
       if (tab === 'files') loadAdminFiles();
       if (tab === 'contests') loadContests();
@@ -23,7 +24,11 @@
       if (tab === 'tags') loadAdminTags();
       if (tab === 'announcements') loadAdminAnnouncements();
     }
-    function showCreateContest() { document.getElementById('createContestForm').classList.remove('hidden'); }
+    function showCreateContest() {
+      // 可见性控件仅 admin/su 可见；新建默认公开
+      initVisibilityControl('cVisibilityBox', 'cVisibility', 'cVisibilityGroups');
+      document.getElementById('createContestForm').classList.remove('hidden');
+    }
     function hideCreateContest() { document.getElementById('createContestForm').classList.add('hidden'); }
 
     let editingAnnouncementId = null;
@@ -429,6 +434,8 @@
       if (catSel) Array.from(catSel.options).forEach(opt => opt.selected = false);
       const tagSel = document.getElementById('pTags');
       if (tagSel) Array.from(tagSel.options).forEach(opt => opt.selected = false);
+      // 可见性：新建默认公开；控件仅 admin/su 可见（HTML 里默认 hidden）
+      initVisibilityControl('pVisibilityBox', 'pVisibility', 'pVisibilityGroups');
       document.getElementById('createProblemForm').classList.remove('hidden');
     }
     function hideCreateProblem() { document.getElementById('createProblemForm').classList.add('hidden'); editingProblemId = null; }
@@ -463,6 +470,11 @@
         await loadProblemCategories(id);
         await loadAllTags();
         await loadProblemTags(id);
+        // 可见性回填：GET /problems/:id/visibility（仅 admin/su）
+        if (canManageVisibility()) {
+          showVisibilityControl('pVisibilityBox', 'pVisibilityGroups');
+          await loadEntityVisibility('problems', id, 'pVisibility', 'pVisibilityGroups');
+        }
       } catch (err) { showToast(err.message, 'error'); }
     }
 
@@ -554,6 +566,8 @@
         }
         hideCreateProblem();
         loadAdminProblems();
+        // 题目主数据已保存，再补可见性（失败仅 toast 提示「主数据已保存，可见性设置失败」，不回滚）
+        if (newId) await saveEntityVisibility('problems', newId, 'pVisibility', 'pVisibilityGroups');
       } catch (err) { showToast(err.message || '操作失败', 'error'); }
     }
 
@@ -1252,9 +1266,10 @@ async function banUser(id) { try { await apiCall('POST', `/users/${id}/ban`); lo
       } catch (err) { console.error(err); }
     }
 
+    // 比赛没有编辑表单，可见性只在创建流程里设置；如需改可见性请删掉重建或另加编辑入口
     async function createContest() {
       try {
-        await apiCall('POST', '/contests', {
+        const created = await apiCall('POST', '/contests', {
           title: document.getElementById('cTitle').value,
           start_time: localInputToIso(document.getElementById('cStart').value),
           end_time: localInputToIso(document.getElementById('cEnd').value),
@@ -1262,6 +1277,8 @@ async function banUser(id) { try { await apiCall('POST', `/users/${id}/ban`); lo
         });
         hideCreateContest();
         loadContests();
+        // 比赛主数据已保存，再补可见性（失败仅 toast，不回滚）
+        if (created && created.id) await saveEntityVisibility('contests', created.id, 'cVisibility', 'cVisibilityGroups');
       } catch (err) { showToast(err.message, 'error'); }
     }
 
@@ -1485,6 +1502,240 @@ async function banUser(id) { try { await apiCall('POST', `/users/${id}/ban`); lo
       } catch (err) {
         showToast(err.message || '发起查重失败', 'error');
       }
+    }
+
+    // ── 用户组（实体可见性分组）─────────────────────────────
+    // 命名一律带 UserGroup 前缀：本文件的 currentGroups/loadGroups/renderGroups/
+    // showGroupEditor/saveGroup/deleteGroup 已被测试点(Subtask)分组占用，不能重名。
+    let userGroupsCache = [];
+    let editingUserGroupId = null;
+    let currentUserGroupId = null;
+    let userGroupMembersPage = 1;
+    const USER_GROUP_SYSTEM_TIP = '系统组不可变更';
+
+    function isSystemUserGroup(g) { return !!g && g.kind !== 'custom'; }
+
+    function userGroupKindBadge(g) {
+      if (g.kind === 'all_users') {
+        return '<span class="px-2 py-0.5 text-xs rounded-full font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300 ring-1 ring-amber-400" title="系统组：站内全部用户">所有用户</span>';
+      }
+      if (g.kind === 'personal') {
+        return '<span class="px-2 py-0.5 text-xs rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300" title="系统组：个人私有组">个人组</span>';
+      }
+      return '<span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">自定义</span>';
+    }
+
+    // 系统组的操作按钮渲染为 disabled + title 提示，UI 上不可操作
+    function userGroupActionBtn(label, onclick, sys, cls) {
+      const base = `text-xs hover:underline ${cls}`;
+      if (sys) return `<button disabled title="${USER_GROUP_SYSTEM_TIP}" class="${base} opacity-40 cursor-not-allowed">${label}</button>`;
+      return `<button onclick="${onclick}" class="${base}">${label}</button>`;
+    }
+
+    async function loadUserGroups() {
+      const tbody = document.getElementById('userGroupList');
+      try {
+        const data = await apiCall('GET', '/groups');
+        // 兼容裸数组与 {groups:[...]} 两种返回
+        userGroupsCache = Array.isArray(data) ? data : (data.groups || data.data || []);
+        renderUserGroups();
+      } catch (err) {
+        if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="px-4 py-6 text-center text-sm text-red-500 dark:text-red-400">${escapeHtml(err.message) || '加载失败'}</td></tr>`;
+      }
+    }
+
+    function renderUserGroups() {
+      const tbody = document.getElementById('userGroupList');
+      if (!tbody) return;
+      if (userGroupsCache.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-6 text-center text-sm text-gray-400 dark:text-gray-500 dark:text-gray-400">暂无用户组</td></tr>';
+        return;
+      }
+      tbody.innerHTML = userGroupsCache.map(g => {
+        const sys = isSystemUserGroup(g);
+        const owner = g.kind === 'personal' ? `<span class="ml-1 text-xs text-gray-400 dark:text-gray-500 dark:text-gray-400">用户 #${g.owner_id ?? ''}</span>` : '';
+        const desc = g.description
+          ? escapeHtml(g.description)
+          : '<span class="text-gray-300 dark:text-gray-600">-</span>';
+        return `
+          <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+            <td class="px-4 py-3 text-sm">${g.id}</td>
+            <td class="px-4 py-3 text-sm font-medium">${escapeHtml(g.name || '')}${owner}</td>
+            <td class="px-4 py-3 text-center">${userGroupKindBadge(g)}</td>
+            <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 dark:text-gray-500">${desc}</td>
+            <td class="px-4 py-3 text-center text-sm">${g.member_count || 0}</td>
+            <td class="px-4 py-3 text-center text-sm ${g.resource_count ? 'text-orange-600 dark:text-orange-400' : ''}">${g.resource_count || 0}</td>
+            <td class="px-4 py-3 text-center space-x-2 whitespace-nowrap">
+              ${userGroupActionBtn('改名/描述', `showUserGroupForm(${g.id})`, sys, 'text-blue-600 dark:text-blue-400')}
+              ${userGroupActionBtn('成员', `openUserGroupMembers(${g.id})`, sys, 'text-indigo-600 dark:text-indigo-400')}
+              ${userGroupActionBtn('删除', `deleteUserGroup(${g.id})`, sys, 'text-red-600 dark:text-red-400')}
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function showUserGroupForm(gid) {
+      const g = gid ? userGroupsCache.find(x => x.id === gid) : null;
+      if (gid && isSystemUserGroup(g)) { showToast(USER_GROUP_SYSTEM_TIP, 'error'); return; }
+      editingUserGroupId = gid || null;
+      document.getElementById('userGroupFormTitle').textContent = g ? `编辑用户组 #${gid}` : '新建用户组';
+      document.getElementById('userGroupSaveBtn').textContent = g ? '保存' : '创建';
+      document.getElementById('ugName').value = g ? (g.name || '') : '';
+      document.getElementById('ugDesc').value = g ? (g.description || '') : '';
+      document.getElementById('createUserGroupForm').classList.remove('hidden');
+    }
+
+    function hideUserGroupForm() {
+      document.getElementById('createUserGroupForm').classList.add('hidden');
+      editingUserGroupId = null;
+    }
+
+    async function createUserGroup() {
+      const name = document.getElementById('ugName').value.trim();
+      const description = document.getElementById('ugDesc').value.trim();
+      if (!name) { showToast('请输入组名', 'info'); return; }
+      const btn = document.getElementById('userGroupSaveBtn');
+      if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
+      try {
+        if (editingUserGroupId) {
+          await apiCall('PUT', `/groups/${editingUserGroupId}`, { name, description });
+          showToast('已保存', 'success');
+        } else {
+          await apiCall('POST', '/groups', { name, description });
+          showToast('用户组已创建', 'success');
+        }
+        hideUserGroupForm();
+        await loadUserGroups();
+      } catch (err) { showToast(err.message || '操作失败', 'error'); }
+      finally { if (btn) { btn.disabled = false; btn.textContent = editingUserGroupId ? '保存' : '创建'; } }
+    }
+
+    // force=1 时后端先把关联实体回退为 visibility='public' 再删组
+    async function deleteUserGroup(id, force) {
+      const g = userGroupsCache.find(x => x.id === id);
+      if (isSystemUserGroup(g)) { showToast(USER_GROUP_SYSTEM_TIP, 'error'); return; }
+      const label = g ? g.name : `#${id}`;
+      const bound = (g && g.resource_count) || 0;
+      if (force) {
+        if (!confirm(`强制删除用户组「${label}」？\n该组关联的实体会被恢复为公开可见，此操作不可撤销。`)) return;
+      } else if (bound > 0) {
+        if (!confirm(`用户组「${label}」仍关联着 ${bound} 个实体，普通删除会被拒绝。\n是否强制删除（关联实体会恢复为公开）？`)) return;
+        return deleteUserGroup(id, true);
+      } else if (!confirm(`确定删除用户组「${label}」？此操作不可撤销。`)) return;
+
+      try {
+        await apiCall('DELETE', `/groups/${id}?force=${force ? 1 : 0}`);
+        showToast('用户组已删除', 'success');
+        if (editingUserGroupId === id) hideUserGroupForm();
+        if (currentUserGroupId === id) closeUserGroupMembers();
+        await loadUserGroups();
+      } catch (err) {
+        // 契约：绑定实体且 force 非 1 → 403/409 ERR_INVALID_STATE，message 里列出实体
+        if (!force && err && err.reason === 'ERR_INVALID_STATE') {
+          showToast(err.message || '该用户组仍绑定着实体', 'error');
+          if (confirm('是否改用强制删除？\n强制删除会把关联实体的可见性恢复为公开。')) deleteUserGroup(id, true);
+          return;
+        }
+        showToast(err.message || '操作失败', 'error');
+      }
+    }
+
+    function openUserGroupMembers(id) {
+      const g = userGroupsCache.find(x => x.id === id);
+      if (isSystemUserGroup(g)) { showToast(USER_GROUP_SYSTEM_TIP, 'error'); return; }
+      currentUserGroupId = id;
+      document.getElementById('userGroupMembersTitle').textContent = `成员管理 - ${g ? g.name : '#' + id}`;
+      document.getElementById('ugMembersHint').textContent = '按用户 ID 添加成员（后端按 user_id 匹配）';
+      document.getElementById('userGroupMembers').classList.remove('hidden');
+      loadUserGroupMembers(1);
+    }
+
+    function closeUserGroupMembers() {
+      document.getElementById('userGroupMembers').classList.add('hidden');
+      currentUserGroupId = null;
+    }
+
+    async function loadUserGroupMembers(page) {
+      if (page) userGroupMembersPage = page;
+      const gid = currentUserGroupId;
+      if (!gid) return;
+      const listEl = document.getElementById('userGroupMemberList');
+      const pagerEl = document.getElementById('userGroupMembersPager');
+      try {
+        const data = await apiCall('GET', `/groups/${gid}/members?page=${userGroupMembersPage}&limit=20`);
+        const members = Array.isArray(data) ? data : (data.members || data.users || []);
+        const total = (data && data.total) || members.length;
+        const pageSize = (data && (data.limit || data.page_size)) || 20;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        if (pagerEl) {
+          const btn = (target, label) => `
+            <button ${target < 1 || target > totalPages ? 'disabled' : ''} onclick="loadUserGroupMembers(${target})"
+              class="px-3 py-1 rounded-lg border border-gray-300 dark:border-gray-600 ${target < 1 || target > totalPages ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-100 dark:hover:bg-gray-700'} text-gray-700 dark:text-gray-300">${label}</button>`;
+          pagerEl.innerHTML = `
+            <span class="text-gray-500 dark:text-gray-400 dark:text-gray-400">共 ${total} 位成员 · 第 ${userGroupMembersPage}/${totalPages} 页</span>
+            <span class="space-x-2">${btn(userGroupMembersPage - 1, '上一页')}${btn(userGroupMembersPage + 1, '下一页')}</span>`;
+        }
+        if (members.length === 0) {
+          listEl.innerHTML = '<div class="text-sm text-gray-400 dark:text-gray-500 dark:text-gray-400 py-2">暂无成员</div>';
+          return;
+        }
+        const g = userGroupsCache.find(x => x.id === gid);
+        const sys = isSystemUserGroup(g);
+        listEl.innerHTML = members.map(m => {
+          const uid = m.id != null ? m.id : m.user_id;
+          const isOwner = !!g && g.kind === 'personal' && uid === g.owner_id;
+          const removeCell = isOwner
+            ? '<span class="text-xs text-gray-400 dark:text-gray-500 dark:text-gray-400" title="个人组成员恒为创建者，不可移除">所有者（只读）</span>'
+            : userGroupActionBtn('移除', `removeUserGroupMember(${gid}, ${uid})`, sys, 'text-red-600 dark:text-red-400');
+          return `
+          <div class="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 rounded-lg">
+            <div class="flex items-center space-x-3 flex-wrap">
+              <span class="text-sm font-mono text-gray-500 dark:text-gray-400 dark:text-gray-400">#${uid}</span>
+              <a href="profile.html?id=${uid}" class="text-indigo-600 dark:text-indigo-400 hover:underline">${escapeHtml(m.nickname || m.username || '')}</a>
+              <span class="text-xs text-gray-400 dark:text-gray-500 dark:text-gray-400">@${escapeHtml(m.username || '')}</span>
+              ${roleBadge(m.role)}
+              ${isOwner ? '<span class="text-xs px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">所有者</span>' : ''}
+            </div>
+            ${removeCell}
+          </div>`;
+        }).join('');
+      } catch (err) {
+        listEl.innerHTML = `<p class="text-sm text-red-500 dark:text-red-400 py-2">${escapeHtml(err.message) || '加载失败'}</p>`;
+      }
+    }
+
+    // 契约：POST /groups/:id/members 只收 {user_id}，故这里只做 ID 输入
+    async function addUserGroupMember() {
+      const gid = currentUserGroupId;
+      if (!gid) { showToast('请先打开某个用户组的成员管理', 'info'); return; }
+      const g = userGroupsCache.find(x => x.id === gid);
+      if (isSystemUserGroup(g)) { showToast(USER_GROUP_SYSTEM_TIP, 'error'); return; }
+      const raw = document.getElementById('ugMemberId').value.trim();
+      const userId = parseInt(raw, 10);
+      if (!/^\d+$/.test(raw) || !(userId > 0)) { showToast('请输入有效的用户 ID', 'info'); return; }
+      const btn = document.getElementById('ugAddMemberBtn');
+      if (btn) { btn.disabled = true; btn.textContent = '添加中...'; }
+      try {
+        await apiCall('POST', `/groups/${gid}/members`, { user_id: userId });
+        document.getElementById('ugMemberId').value = '';
+        showToast('已添加成员', 'success');
+        await loadUserGroupMembers();
+        await loadUserGroups();
+      } catch (err) { showToast(err.message || '操作失败', 'error'); }
+      finally { if (btn) { btn.disabled = false; btn.textContent = '添加成员'; } }
+    }
+
+    async function removeUserGroupMember(gid, userId) {
+      const g = userGroupsCache.find(x => x.id === gid);
+      if (isSystemUserGroup(g)) { showToast(USER_GROUP_SYSTEM_TIP, 'error'); return; }
+      if (!confirm('确定将该用户移出此用户组？')) return;
+      try {
+        await apiCall('DELETE', `/groups/${gid}/members/${userId}`);
+        showToast('已移除成员', 'success');
+        await loadUserGroupMembers();
+        await loadUserGroups();
+      } catch (err) { showToast(err.message || '操作失败', 'error'); }
     }
 
     loadAdminProblems();

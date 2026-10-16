@@ -64,6 +64,17 @@ module.exports = [
         localInputToIso: false,
         renderMathDefaults: false,
         renderMarkdown: false,
+        // ── 实体可见性（用户组）共享工具：api.js 定义，admin.js / 各页面内联 onclick 调用
+        canManageVisibility: false,
+        ensureVisibilityGroups: false,
+        loadVisibilityGroupOptions: false,
+        showVisibilityControl: false,
+        initVisibilityControl: false,
+        syncVisibilityGroupsInput: false,
+        loadEntityVisibility: false,
+        collectVisibilityPayload: false,
+        saveEntityVisibility: false,
+        resetVisibilityControl: false,
         // ── 由三方 <script> 注入的全局 ───────────────────────────
         DOMPurify: false, // js/purify.min.js
         XLSX: false, // js/xlsx.full.min.js

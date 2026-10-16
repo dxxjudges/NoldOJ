@@ -1,6 +1,8 @@
 // routes/problems/index.js —— 题目域路由组装（原 routes/problems.js 拆分后的入口）
 // module.exports 保持为单个 express Router（server.js 与测试均按 require('../routes/problems') 取用）
 const express = require('express');
+const problemsRepo = require('../../repositories/problems');
+const { makeVisibilityRouter } = require('../_visibility');
 
 const list = require('./list');
 const crud = require('./crud');
@@ -9,6 +11,14 @@ const solutions = require('./solutions');
 const extras = require('./extras');
 
 const router = express.Router();
+
+// 实体可见性（用户组维度）：GET/PUT /:id/visibility，仅此一个工厂复用点
+router.use(makeVisibilityRouter({
+  resourceType: 'problem',
+  tableName: 'problems',
+  findResource: problemsRepo.getProblemById,
+  setVisibility: problemsRepo.setVisibility
+}));
 
 // 各分组内部路由注册顺序与原文件一致；分组间不存在同 method+path 的路由，挂载顺序不影响匹配
 router.use(list);

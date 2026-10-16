@@ -25,6 +25,10 @@ const ALLOWED_TABLES = new Set([
   'user_favorites', 'achievements', 'user_achievements',
   'exams', 'exam_questions', 'exam_submissions', 'exam_answers'
 ]);
+// groups / user_groups / resource_group_access 不在白名单内：groups 主键是
+// AUTOINCREMENT（id 由 SQLite 经 sqlite_sequence 分配），不需要 MAX(id)+1 分配器，
+// 因此不需要 findNextId 支持；user_groups / resource_group_access 是纯复合主键关联表，
+// 本就没有独立 id。
 
 // 试卷内编程题的题目号段起点：题库普通题目 id 恒 < 此值，
 // 试卷内部题目 id 恒 >= 此值，两侧独立分配（见 findNextId 特判与 exams.js 分配逻辑）。
@@ -579,6 +583,81 @@ async function initDB() {
       logInfo('DB', '初始管理员账号 admin 已创建，初始密码由环境变量 NoldOJ_INIT_ADMIN_PASSWORD 指定（不回显）');
     } else {
       logInfo('DB', '初始管理员账号 admin 已创建，初始密码（仅此一次显示）: ' + initialPw);
+    }
+  }
+
+  // ═══ 用户组与实体可见性（groups / user_groups / resource_group_access）═══
+  // 1) 新表：schema.sql 已含（CREATE TABLE IF NOT EXISTS），此处沿用 tags/categories 的
+  //    tableExists 惯例再兜一层（老库若被外部删表仍可自愈）。DDL 与 schema.sql 逐字一致，
+  //    两处都要放：schema.sql 保证新库全量，这里保证老库升级。
+  if (!tableExists('groups')) {
+    sqlDb.exec(`CREATE TABLE IF NOT EXISTS groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      kind TEXT NOT NULL DEFAULT 'custom' CHECK(kind IN ('custom','personal','all_users')),
+      owner_id INTEGER,
+      created_at TEXT NOT NULL
+    )`);
+    sqlDb.exec(`CREATE TABLE IF NOT EXISTS user_groups (
+      user_id INTEGER NOT NULL,
+      group_id INTEGER NOT NULL,
+      joined_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, group_id)
+    )`);
+    sqlDb.exec(`CREATE TABLE IF NOT EXISTS resource_group_access (
+      resource_type TEXT NOT NULL CHECK(resource_type IN ('problem','contest','exam','problem_set')),
+      resource_id INTEGER NOT NULL,
+      group_id INTEGER NOT NULL,
+      PRIMARY KEY (resource_type, resource_id, group_id)
+    )`);
+  }
+  // 索引与自动入组触发器：无条件重建（IF NOT EXISTS，幂等）。
+  // 既有惯例"新列索引只建在 initDB"（见上方 exam 段）针对的是 problems.exam_id 这类
+  // 既有表的新列——旧库跑 schema.sql 时 CREATE INDEX 会在 ALTER 之前因缺列报错。
+  // 下面三张表在 schema.sql 中由 CREATE TABLE IF NOT EXISTS 先行建出，故两处都能安全
+  // 建索引；此处再无条件兜一遍，覆盖老库缺表自愈、以及触发器随版本更新的路径。
+  sqlDb.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_personal ON groups(owner_id) WHERE kind=\'personal\'');
+  sqlDb.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_all_users ON groups(kind) WHERE kind=\'all_users\'');
+  sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_user_groups_group ON user_groups(group_id)');
+  sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_rga_resource ON resource_group_access(resource_type, resource_id)');
+  sqlDb.exec(`CREATE TRIGGER IF NOT EXISTS trg_users_default_groups AFTER INSERT ON users
+    BEGIN
+      INSERT OR IGNORE INTO groups (name, description, kind, owner_id, created_at) VALUES (NEW.username, '个人组', 'personal', NEW.id, datetime('now'));
+      UPDATE groups SET name = NEW.username WHERE kind = 'personal' AND owner_id = NEW.id;
+      INSERT OR IGNORE INTO user_groups (user_id, group_id, joined_at) SELECT NEW.id, id, datetime('now') FROM groups WHERE kind='personal' AND owner_id = NEW.id;
+      INSERT OR IGNORE INTO user_groups (user_id, group_id, joined_at) SELECT NEW.id, id, datetime('now') FROM groups WHERE kind='all_users';
+    END;`);
+
+  // 2) 实体可见性列：老库渐进 ALTER。DEFAULT 'public' 即满足"存量实体全部公开"，
+  //    无需额外回填语句。CHECK 约束随 ALTER 一并落到表定义上。
+  const visCol = (t) => {
+    if (tableCols(t).includes('visibility')) return;
+    sqlDb.exec(`ALTER TABLE ${t} ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public' CHECK(visibility IN ('public','groups'))`);
+  };
+  for (const t of ['problems', 'contests', 'exams', 'problem_sets']) visCol(t);
+
+  // 3) 回填（幂等，可反复执行）：全体组 + 每个用户的个人组与两条成员关系。
+  //    触发器已覆盖本次启动之后的新注册用户，这里处理存量用户（含本次启动新建的 admin）。
+  {
+    if (!sqlDb.prepare("SELECT id FROM groups WHERE kind='all_users'").get()) {
+      sqlDb.prepare(`
+        INSERT INTO groups (name, description, kind, owner_id, created_at)
+        VALUES ('所有用户', '系统默认组，所有注册用户自动加入', 'all_users', NULL, datetime('now'))
+      `).run();
+    }
+    const allUsersId = sqlDb.prepare("SELECT id FROM groups WHERE kind='all_users'").get()?.id;
+    const findPersonal = sqlDb.prepare("SELECT id FROM groups WHERE kind='personal' AND owner_id = ?");
+    const insPersonal = sqlDb.prepare(`
+      INSERT OR IGNORE INTO groups (name, description, kind, owner_id, created_at)
+      VALUES (?, '个人组', 'personal', ?, datetime('now'))
+    `);
+    const insMember = sqlDb.prepare("INSERT OR IGNORE INTO user_groups (user_id, group_id, joined_at) VALUES (?, ?, datetime('now'))");
+    for (const u of sqlDb.prepare('SELECT id, username FROM users').all()) {
+      const personal = findPersonal.get(u.id);
+      const personalId = personal ? personal.id : insPersonal.run(u.username, u.id).lastInsertRowid;
+      insMember.run(u.id, personalId);
+      if (allUsersId) insMember.run(u.id, allUsersId);
     }
   }
 

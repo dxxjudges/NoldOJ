@@ -1,5 +1,6 @@
 const express = require('express');
 const contestsRepo = require('../repositories/contests');
+const { makeVisibilityRouter, visibilityFilterFor, visibilityDeniedMessage, canView } = require('./_visibility');
 const { requireAuth, requireRole, optionalAuth } = require('../middleware/auth');
 const { parsePageLimit } = require('../utils/pagination');
 const { isStaff } = require('../utils/roles');
@@ -10,9 +11,17 @@ const { createRateLimit } = require('../middleware/ratelimit');
 // R9-3: 一键查重限流（每分钟最多 5 次）
 const plagiarismRateLimit = createRateLimit({ windowMs: 60000, max: 5 });
 
-const { sendNotFound } = require('../utils/apiErrors');
+const { sendNotFound, sendForbidden } = require('../utils/apiErrors');
 
 const router = express.Router();
+
+// 实体可见性（用户组维度）：GET/PUT /:id/visibility
+router.use(makeVisibilityRouter({
+  resourceType: 'contest',
+  tableName: 'contests',
+  findResource: contestsRepo.get,
+  setVisibility: contestsRepo.setVisibility
+}));
 
 // 公开比赛列表保持匿名可访问；挂 optionalAuth 以便识别登录用户角色
 router.get('/', optionalAuth, (req, res) => {
@@ -22,8 +31,15 @@ router.get('/', optionalAuth, (req, res) => {
   const params = [];
   const fuzzy = search ? '%' + search.replace(/\s+/g, '') + '%' : null;
   // 隐藏比赛仅对 teacher/admin/su 可见
-  if (!req.user || !isStaff(req.user.role)) {
+  const staff = !!req.user && isStaff(req.user.role);
+  if (!staff) {
     where = 'WHERE c.is_hidden = 0';
+    // 实体可见性（用户组）：staff 条件为空 → 不过滤；其余按 public ∪ 命中绑定组过滤
+    const vis = visibilityFilterFor(req, 'contest');
+    if (vis.sql) {
+      where += ` AND (${vis.sql})`;
+      params.push(...vis.params);
+    }
   }
   if (search) {
     const cond = "REPLACE(c.title, ' ', '') LIKE ? OR REPLACE(c.description, ' ', '') LIKE ?";
@@ -43,6 +59,10 @@ router.get('/:id', optionalAuth, (req, res) => {
   // 隐藏比赛仅对管理角色可见
   if (contest.is_hidden && !(req.user && isStaff(req.user.role))) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Contest not found.' });
+  }
+  // 实体可见性（用户组）：visibility='groups' 的比赛仅绑定组成员与 staff 可见
+  if (!canView(req, 'contest', contest.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('contest'));
   }
   const staff = !!req.user && isStaff(req.user.role);
   let problems;
@@ -189,6 +209,10 @@ router.post('/:id/join', requireAuth, (req, res) => {
   if (contest.is_hidden && !isStaff(req.user.role)) {
     return sendNotFound(res, 'Contest not found.');
   }
+  // 实体可见性（用户组）：组外用户不得报名（否则可借参赛名单探测组内比赛）
+  if (!canView(req, 'contest', contest.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('contest'));
+  }
   const existing = contestsRepo.findParticipant(contest.id, req.user.id);
   if (existing) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'Already joined this contest.' });
@@ -223,6 +247,10 @@ router.get('/:id/leaderboard', optionalAuth, (req, res) => {
   // 10.3: 隐藏比赛排行榜仅 staff 可见
   if (contest.is_hidden && !(req.user && isStaff(req.user.role))) {
     return sendNotFound(res, 'Contest not found.');
+  }
+  // 实体可见性（用户组）：组外用户不得读榜（含题目 id 与排名）
+  if (!canView(req, 'contest', contest.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('contest'));
   }
 
   // 判断冻结状态: freeze_minutes>0 且当前时间已过冻结时刻 且 未手动解冻
@@ -333,12 +361,24 @@ router.get('/:id/announcements', optionalAuth, (req, res) => {
   if (contest.is_hidden && !(req.user && isStaff(req.user.role))) {
     return sendNotFound(res, 'Contest not found.');
   }
+  // 实体可见性（用户组）：公告与详情页同口径
+  if (!canView(req, 'contest', contest.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('contest'));
+  }
   const items = contestsRepo.listAnnouncements(req.params.id);
   res.json({ announcements: items });
 });
 
 // 功能9：发起虚拟参加
 router.post('/:id/virtual-start', requireAuth, (req, res) => {
+  // 实体可见性（用户组）：虚拟参加会复制整套题目，组外用户不得发起（virtualStart 内再做一次隐藏比赛校验）
+  const contest = contestsRepo.get(req.params.id);
+  if (!contest) {
+    return sendNotFound(res, 'Contest not found.');
+  }
+  if (!canView(req, 'contest', contest.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('contest'));
+  }
   const { virtualStart } = require('../routes/virtual-contests');
   virtualStart(req, res);
 });
@@ -371,6 +411,10 @@ router.get('/:id/discussions', optionalAuth, (req, res) => {
   // 10.3: 隐藏比赛讨论仅 staff 可见
   if (contest.is_hidden && !(req.user && isStaff(req.user.role))) {
     return sendNotFound(res, 'Contest not found.');
+  }
+  // 实体可见性（用户组）：讨论列表与详情页同口径
+  if (!canView(req, 'contest', contest.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('contest'));
   }
   const total = contestsRepo.countDiscussions(req.params.id);
   const items = contestsRepo.listDiscussions(req.params.id, sizeNum, offset);

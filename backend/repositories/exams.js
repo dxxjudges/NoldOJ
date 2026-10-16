@@ -8,12 +8,19 @@ const { sanitizeText } = require('../utils/securityHelpers');
 const EXAM_PROBLEM_ID_BASE = db.EXAM_PROBLEM_ID_BASE;
 
 // ── 试卷列表（GET /）：可见性过滤与搜索条件在此拼接（动态 SQL 收口到数据访问层）──
-function listExams({ isStaff, search, limit, offset }) {
+function listExams({ isStaff, search, limit, offset, visibilityFilter }) {
   let where = '';
   const params = [];
 
   if (!isStaff) {
     where = 'WHERE e.is_public = 1 AND e.is_hidden = 0';
+  }
+
+  // 实体可见性（用户组）：utils/access.js 生成的条件对象 { sql, params }，别名固定为 e；
+  // 路由层注入，缺省时不追加任何条件（旧调用方行为不变）
+  if (visibilityFilter && visibilityFilter.sql) {
+    where = where ? `${where} AND (${visibilityFilter.sql})` : `WHERE ${visibilityFilter.sql}`;
+    params.push(...(visibilityFilter.params || []));
   }
 
   if (search) {
@@ -155,6 +162,11 @@ function createSubmissionWithAnswers({ examId, userId, maxScore, rows, totalScor
 }
 
 // ── 试卷更新 ──
+// 实体可见性（用户组维度）：仅由 routes/_visibility.js 的 PUT 写入，值受 CHECK 约束
+function setVisibility(id, visibility) {
+  db.prepare("UPDATE exams SET visibility = ?, updated_at = datetime('now') WHERE id = ?").run(visibility, id);
+}
+
 function updateExamBase(id, v) {
   db.prepare(`
     UPDATE exams SET
@@ -606,6 +618,7 @@ module.exports = {
   getLastUserSubmission,
   createSubmissionWithAnswers,
   updateExamBase,
+  setVisibility,
   updateExamWindow,
   hasUserSubmission,
   getLeaderboardRows,

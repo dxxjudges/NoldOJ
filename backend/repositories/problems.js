@@ -32,6 +32,14 @@ function listProblems(filters) {
     where += ' AND p.is_hidden = 0';
   }
 
+  // 实体可见性（用户组）：utils/access.js 生成的条件对象 { sql, params }，别名固定为 p；
+  // 路由层注入，缺省时不追加任何条件（旧调用方行为不变）
+  const vis = filters.visibilityFilter;
+  if (vis && vis.sql) {
+    where += ` AND (${vis.sql})`;
+    params.push(...(vis.params || []));
+  }
+
   if (search) {
     const fuzzy = '%' + search.replace(/\s+/g, '') + '%';
     where += ` AND (REPLACE(p.title, ' ', '') LIKE ? OR REPLACE(p.description, ' ', '') LIKE ? OR REPLACE(IFNULL(p.provider, ''), ' ', '') LIKE ?)`;
@@ -215,6 +223,11 @@ function insertImportedProblem(p) {
 // 动态 SET 片段由路由层 buildUpdates 生成，此处整体拼接执行
 function updateProblem(id, u) {
   db.prepare(`UPDATE problems SET ${u.clause} WHERE id = ?`).run(...u.values, id);
+}
+
+// 实体可见性（用户组维度）：仅由 routes/_visibility.js 的 PUT 写入，值受 CHECK 约束
+function setVisibility(id, visibility) {
+  db.prepare("UPDATE problems SET visibility = ?, updated_at = datetime('now') WHERE id = ?").run(visibility, id);
 }
 
 function deleteTestCases(problemId) {
@@ -529,6 +542,7 @@ module.exports = {
   insertProblem,
   insertImportedProblem,
   updateProblem,
+  setVisibility,
   deleteTestCases,
   deleteTestGroups,
   deleteSamples,

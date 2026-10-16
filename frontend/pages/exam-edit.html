@@ -56,6 +56,15 @@
             <label class="flex items-center gap-2"><input id="f-showanswer" type="checkbox" class="w-4 h-4 text-indigo-600 rounded"><span class="text-sm text-gray-700 dark:text-gray-300">提交后显示答案</span></label>
             <label class="flex items-center gap-2"><input id="f-ai" type="checkbox" checked class="w-4 h-4 text-indigo-600 rounded"><span class="text-sm text-gray-700 dark:text-gray-300">AI 评分</span></label>
           </div>
+          <div id="fVisibilityBox" class="md:col-span-2 hidden">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">可见性（仅管理员/超级管理员可设置）</label>
+            <div class="flex items-center gap-4 mb-2">
+              <label class="flex items-center gap-2"><input type="radio" name="fVisibility" value="public" checked onchange="syncVisibilityGroupsInput('fVisibility', 'fVisibilityGroups')" class="w-4 h-4 text-indigo-600"><span class="text-sm text-gray-700 dark:text-gray-300">公开</span></label>
+              <label class="flex items-center gap-2"><input type="radio" name="fVisibility" value="groups" onchange="syncVisibilityGroupsInput('fVisibility', 'fVisibilityGroups')" class="w-4 h-4 text-indigo-600"><span class="text-sm text-gray-700 dark:text-gray-300">仅指定用户组</span></label>
+            </div>
+            <select id="fVisibilityGroups" multiple data-visibility-radio="fVisibility" class="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm dark:bg-gray-700 dark:text-white min-h-[80px]" aria-label="可见用户组（按住 Ctrl/Cmd 多选）"></select>
+            <p class="text-xs text-gray-400 mt-1">与上方「公开 / 隐藏」并列的新维度：选“仅指定用户组”时至少勾选一个组；教师保存时可见性保持公开。</p>
+          </div>
         </div>
       </div>
 
@@ -123,6 +132,9 @@
     let questions = [];
     let questionIdCounter = 0;
 
+    // 可见性控件仅 admin/su 可见；teacher 看不到控件、保存时不发 PUT，试卷保持公开
+    initVisibilityControl('fVisibilityBox', 'fVisibility', 'fVisibilityGroups');
+
     // ISO8601（存储/传输） ⇆ datetime-local 输入值（本地墙钟） 互转
     function isoToLocalInput(iso) {
       if (!iso) return '';
@@ -172,6 +184,10 @@
         document.getElementById('f-freeze').value = data.freeze_minutes || 0;
         document.getElementById('f-lben').checked = data.leaderboard_enabled !== 0;
         document.getElementById('f-lbinc').checked = data.leaderboard_view_incomplete === 1;
+        // 可见性回填（仅 admin/su）；教师无权访问该接口，跳过
+        if (canManageVisibility()) {
+          await loadEntityVisibility('exams', editId, 'fVisibility', 'fVisibilityGroups');
+        }
 
         questions = (data.questions || []).map(q => {
           const item = {
@@ -677,11 +693,18 @@
       };
 
       try {
+        let examId = editId;
         if (editId) {
           await apiCall('PUT', `/exams/${editId}`, payload);
         } else {
-          await apiCall('POST', '/exams', payload);
+          const created = await apiCall('POST', '/exams', payload);
+          examId = created && created.id;
         }
+        // 试卷主数据已保存，再补可见性（失败仅 toast 提示「主数据已保存，可见性设置失败」，不回滚）
+        let visFailed = false;
+        if (examId) visFailed = !await saveEntityVisibility('exams', examId, 'fVisibility', 'fVisibilityGroups');
+        // 可见性没设成功时先停一下，让 toast 被看清再跳转
+        if (examId && canManageVisibility() && visFailed) await new Promise(r => setTimeout(r, 1800));
         window.location.href = '/pages/exams.html';
       } catch (err) {
         showToast(err.message || '保存失败', 'error');

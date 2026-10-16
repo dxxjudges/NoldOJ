@@ -7,6 +7,7 @@ const { requireAuth, requireRole, optionalAuth } = require('../../middleware/aut
 const { parsePageLimit } = require('../../utils/pagination');
 // 题目可见性校验与提交接口共用（原为本文件私有，导致 POST /submissions 绕过校验）
 const { problemVisibilityError } = require('../../utils/visibility');
+const { visibilityDeniedMessage, canView } = require('../_visibility');
 const { sanitizeLog } = require('../../utils/securityHelpers');
 const { createRateLimit } = require('../../middleware/ratelimit');
 const config = require('../../config/config');
@@ -20,7 +21,7 @@ const plagiarismRateLimit = createRateLimit({ windowMs: 60000, max: 10 });
 // 10.3: AI 测试点生成是昂贵操作（8192 tokens / 90s），限流防资源耗尽
 const aiTestdataRateLimit = createRateLimit({ windowMs: 60000, max: 5 });
 
-const { sendNotFound } = require('../../utils/apiErrors');
+const { sendNotFound, sendForbidden } = require('../../utils/apiErrors');
 
 const router = express.Router();
 
@@ -36,6 +37,10 @@ router.get('/:id/discussions', optionalAuth, (req, res) => {
   const verr = problemVisibilityError(problem, req);
   if (verr) {
     return res.status(403).json(verr);
+  }
+  // 实体可见性（用户组）：讨论列表与详情页同口径，避免组内题被旁路枚举
+  if (!canView(req, 'problem', problem.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('problem'));
   }
   const total = repo.countDiscussions(req.params.id);
   const items = repo.listDiscussions(req.params.id, sizeNum, offset);

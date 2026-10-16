@@ -64,7 +64,13 @@ function listProblemTags(problemId) {
   `).all(problemId);
 }
 
+// 标签下的题目 id：标签页/详情要按"当前用户可见的题目"统计，SQL 无法直接表达（跨 user_groups）
+function listProblemIds(tagId) {
+  return db.prepare('SELECT problem_id FROM problem_tags WHERE tag_id = ? ORDER BY problem_id')
+    .all(tagId).map(r => r.problem_id);
+}
+
 module.exports = {
   listTagsWithCount, findByName, findByNameExcluding, getTag, insertTag, updateTag,
-  deleteProblemTags, deleteTag, getProblem, setProblemTags, listProblemTags
+  deleteProblemTags, deleteTag, getProblem, setProblemTags, listProblemTags, listProblemIds
 };

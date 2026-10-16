@@ -50,18 +50,27 @@ function getUserDashboardPrivacy(targetId) {
 }
 
 // 提交云图：按题目统计提交次数，用于词云渲染
-function getWordcloud() {
+// visibilityFilter（用户组维度）由路由层注入：utils/access.js 生成 { sql, params }，别名 p；
+// 缺省不追加条件，旧调用方行为不变（staff 的条件为空串，同样不过滤）
+function getWordcloud(filters) {
+  const vis = filters && filters.visibilityFilter;
+  let where = 'WHERE p.is_public = 1 AND p.is_hidden = 0';
+  const params = [];
+  if (vis && vis.sql) {
+    where += ` AND (${vis.sql})`;
+    params.push(...(vis.params || []));
+  }
   return db.prepare(`
-    SELECT p.id, p.title, 
+    SELECT p.id, p.title,
            COUNT(s.id) as submission_count,
            SUM(CASE WHEN s.status = 'accepted' THEN 1 ELSE 0 END) as accepted_count
     FROM problems p
     JOIN submissions s ON s.problem_id = p.id
-    WHERE p.is_public = 1 AND p.is_hidden = 0
+    ${where}
     GROUP BY p.id
     ORDER BY submission_count DESC
     LIMIT 200
-  `).all();
+  `).all(...params);
 }
 
 module.exports = { getCalendarRows, getLanguageRows, getDifficultyRows, getOverview, getUserDashboardPrivacy, getWordcloud };

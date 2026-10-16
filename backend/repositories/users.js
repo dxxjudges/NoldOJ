@@ -1,6 +1,7 @@
 // repositories/users.js —— 用户域数据访问层（P1：db.prepare 不再散落在路由层）
 // 含删用户的 18 连删事务；磁盘文件删除留在路由层（事务提交成功后执行）
 const db = require('../database/db');
+const { RESOURCE_TABLES, deleteGroupResourceRefs } = require('./resourceAccess');
 
 function countUsers(where, params = []) {
   return db.prepare(`SELECT COUNT(*) as c FROM users ${where}`).get(...params).c;
@@ -124,6 +125,24 @@ function deleteUserCascade(target) {
     db.prepare('DELETE FROM exams WHERE creator_id = ?').run(target.id);
     db.prepare('DELETE FROM submissions WHERE user_id = ?').run(target.id); // submission_details 级联
     db.prepare('DELETE FROM uploaded_files WHERE user_id = ?').run(target.id);
+    // 用户组：成员关系与个人组一并清理（组表间无外键，必须手工收尾）
+    // 顺序：先取个人组 id → 清该用户在所有组的成员行 → 每个个人组先清实体绑定（并把
+    // 只绑在它上面的实体回退为 public，否则实体停留在 visibility='groups' 却无组可命中 → 实体失踪）→ 再删组行
+    const personalGroups = db.prepare("SELECT id FROM groups WHERE kind = 'personal' AND owner_id = ?").all(target.id);
+    db.prepare('DELETE FROM user_groups WHERE user_id = ?').run(target.id);
+    for (const g of personalGroups) {
+      for (const ref of deleteGroupResourceRefs(g.id)) {
+        // 表名只来自 RESOURCE_TABLES 固定白名单（resource_type 有 CHECK 约束），不存在注入面
+        const table = RESOURCE_TABLES[ref.type];
+        // 仍有其它绑定组时保持 visibility='groups'，只有"删完无组可命中"才回退为 public
+        if (!table) continue;
+        const bound = db.prepare(`SELECT COUNT(*) as c FROM resource_group_access WHERE resource_type = ? AND resource_id = ?`).get(ref.type, ref.id).c;
+        if (bound === 0) {
+          db.prepare(`UPDATE ${table} SET visibility = 'public' WHERE id = ?`).run(ref.id);
+        }
+      }
+      db.prepare('DELETE FROM groups WHERE id = ?').run(g.id);
+    }
     // 10.3: 清理该用户邮箱的验证码记录（防止遗留隐私数据）
     if (target.email) db.prepare('DELETE FROM email_codes WHERE email = ?').run(target.email);
     db.prepare('DELETE FROM users WHERE id = ?').run(target.id);

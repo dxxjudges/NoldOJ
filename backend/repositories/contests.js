@@ -60,6 +60,12 @@ function update(id, u) {
   db.prepare(`UPDATE contests SET ${u.clause} WHERE id = ?`).run(...u.values, id);
 }
 
+// 实体可见性（用户组维度）：仅由 routes/_visibility.js 的 PUT 写入，值受 CHECK 约束
+// （contests 表无 updated_at 列，故不触碰更新时间）
+function setVisibility(id, visibility) {
+  db.prepare('UPDATE contests SET visibility = ? WHERE id = ?').run(visibility, id);
+}
+
 function findProblem(id) {
   return db.prepare('SELECT id FROM problems WHERE id = ?').get(id);
 }
@@ -174,7 +180,7 @@ function listDiscussions(contestId, limit, offset) {
 
 module.exports = {
   countList, list, getWithCreator, get, findContest, listStaffProblems, listProblems, countParticipants,
-  insert, update, findProblem, findContestProblem, maxSortOrder, insertContestProblem, deleteContestProblem,
+  insert, update, setVisibility, findProblem, findContestProblem, maxSortOrder, insertContestProblem, deleteContestProblem,
   deleteCascade, getUser, findParticipant, inviteParticipant, joinParticipant, listParticipants, removeParticipant,
   getLeaderboardSubmissions, unfreeze, listAnnouncements, listProblemIds, countDiscussions, listDiscussions
 };

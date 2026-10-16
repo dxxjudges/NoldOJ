@@ -2,6 +2,7 @@ const express = require('express');
 const favoritesRepo = require('../repositories/favorites');
 const { requireAuth } = require('../middleware/auth');
 const { parsePageLimit } = require('../utils/pagination');
+const { visibilityFilterFor } = require('./_visibility');
 const { canViewUserData } = require('../utils/roles');
 
 const { sendNotFound } = require('../utils/apiErrors');
@@ -25,8 +26,11 @@ router.get('/', requireAuth, (req, res) => {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: '该用户已对其它用户隐藏收藏。' });
   }
   const { page: pageNum, limit: sizeNum, offset } = parsePageLimit(page, size, 20, 50);
-  const total = favoritesRepo.countByUser(targetId);
-  const items = favoritesRepo.listByUser(req.user.id, targetId, sizeNum, offset);
+  // 实体可见性（用户组）：收藏项会带出题目标题，越权题目不得出现在他人收藏列表里
+  // （staff 条件为空 → 不过滤）
+  const visibilityFilter = visibilityFilterFor(req, 'problem');
+  const total = favoritesRepo.countByUser(targetId, { visibilityFilter });
+  const items = favoritesRepo.listByUser(req.user.id, targetId, sizeNum, offset, visibilityFilter);
   res.json({ total, page: pageNum, size: sizeNum, favorites: items });
 });
 

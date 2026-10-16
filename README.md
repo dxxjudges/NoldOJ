@@ -99,6 +99,9 @@
 - **个人数据看板**：提交日历（近 365 天）、语言分布、AC 难度分布，个人资料页入口
 - **题目收藏**：题目详情页一键收藏，个人收藏页管理，支持查看他人收藏
 - **隐私开关**：`hide_achievements` / `hide_dashboard` / `hide_favorites` 三个独立开关，开启后对其它普通用户隐藏对应数据（admin/su 始终可见），资料页入口自动置灰
+- **用户组与可见性**：注册自动加入「所有用户」系统组与自己的个人组，两个系统组均**不可退出**；组决定题目/比赛/试卷/题单对谁可见
+- **可见性拦截**：`visibility=groups` 的实体仅绑定组成员与 teacher/admin/su 可见，列表自动过滤不报错，直连 URL 一律 403（`ERR_FORBIDDEN`）
+- **管理台「用户组」**：建组、改名/描述、删组、增减成员与设置实体可见性均仅限 admin/su
 
 ### 比赛系统
 - **比赛 CRUD**：教师及以上角色创建、编辑、删除比赛
@@ -438,7 +441,7 @@ NoldOJ/
 │   ├── database/           # 数据库 schema 和初始化（含自动迁移）
 │   ├── data/               # 运行时数据：SQLite 库 + 题目测试数据 problems/（自动创建）
 │   ├── middleware/         # 认证、限流、管理员操作日志
-│   ├── routes/             # API 路由（22 个文件，21 组，163 个端点）
+│   ├── routes/             # API 路由（36 个文件，23 个挂载前缀，179 个端点）
 │   ├── services/           # 评测引擎 + IDE 评测 + AI 安全审查 + 验证码 + 查重
 │   ├── sandbox/            # 代码执行沙箱 + 计分脚本解释器
 │   ├── test/               # 测试（15 个文件：`npm test` 单测 104 项 + 黑盒 `test:server` security 24 项 + reset-login 6 项断言）
@@ -463,6 +466,15 @@ NoldOJ/
 | **超级管理员** | 最高权限 | 所有权限 + 修改角色、重置密码、免密登录、管理语言、设置 Rating、自删除、设置图床限额 |
 
 ## 更新日志
+
+### 新增：用户组与实体可见性（题目/比赛/试卷/题单）
+- **注册自动入组**：用户注册后自动加入两个组——「所有用户」系统组（`kind=all_users`，全体注册用户）与个人组（`kind=personal`，显示名=用户名、owner 为本人）；由 SQLite `AFTER INSERT ON users` 触发器实现，注册、管理员建号、初始 admin、测试直插等任何建号途径都覆盖，存量用户由启动迁移幂等回填
+- **系统组不可退出**：没有任何自助成员变更接口，成员变更仅 admin/su 可执行且对系统组一律拒绝（403 `ERR_FORBIDDEN`）；系统组不可改名/删除
+- **组管理（admin/su）**：建组、改名/描述、删除（组仍绑定实体且未 force → 409 `ERR_INVALID_STATE` 并提示受影响类型与数量，`?force=1` 会把受影响实体回退为公开后再删）、加/减成员
+- **实体可见性**：题目/比赛/试卷/题单新增 `visibility` 字段，`public`（默认，所有人可见，匿名也算）或 `groups`（仅绑定组成员 + teacher/admin/su 可见）；**仅 admin/su** 能改可见性与绑定组（teacher 改 → 403），绑定 `groups` 时必须至少给一个组
+- **访问控制**：列表接口过滤不可见实体（不报错），详情与直连 URL 一律 403（`ERR_FORBIDDEN`，message 形如 `You do not have permission to view this problem.`）；提交、题解、讨论、提示、收藏、词云、榜单等旁路同步生效
+- **管理台**：新增「用户组」tab（建组、改名/删组、增减成员、查看已绑定实体），题目/比赛/试卷/题单编辑页新增可见性选择器（公开 / 指定组可见）
+- 文档：`docs/api/openapi.yaml` 补齐 `/groups` 系列与四类实体 `/:id/visibility` 端点，以及 `Group`、`GroupMember`、`VisibilityPayload`、`VisibilityInfo` schema
 
 ### v2.1.0
 - **新增试卷系统**：支持选择题、判断题、填空题（客观/主观）、大题四种题型

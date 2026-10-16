@@ -1,9 +1,11 @@
 const express = require('express');
 const aiHintRepo = require('../repositories/aiHint');
 const { requireAuth } = require('../middleware/auth');
+const { problemVisibilityError } = require('../utils/visibility');
+const { visibilityDeniedMessage, canView } = require('./_visibility');
 const { sanitizeLog } = require('../utils/securityHelpers');
 
-const { sendNotFound } = require('../utils/apiErrors');
+const { sendNotFound, sendForbidden } = require('../utils/apiErrors');
 const { logError } = require('../utils/logger');
 
 const router = express.Router();
@@ -38,6 +40,16 @@ router.post('/:id/hint', requireAuth, async (req, res) => {
   const problem = aiHintRepo.getProblem(problemId);
   if (!problem) {
     return sendNotFound(res, 'Problem not found.');
+  }
+
+  // 可见性门禁（与 GET /problems/:id 同口径）：否则猜到 id 即可让 AI 把组内题的思路与
+  // 用户代码送出，等于绕过详情页的 403。缺这道门时本接口只校验了"提交失败次数"门槛。
+  const verr = problemVisibilityError(problem, req);
+  if (verr) {
+    return res.status(403).json(verr);
+  }
+  if (!canView(req, 'problem', problem.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('problem'));
   }
 
   // 门槛：至少 2 次未 AC 的提交才能要提示

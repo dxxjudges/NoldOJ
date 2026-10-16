@@ -11,7 +11,7 @@
     "dev": "node --watch src/server.js",
     "lint": "eslint .",
     "lint:frontend": "cd ../frontend && eslint .",
-    "test": "node --test test/scorer.test.js test/compare.test.js test/ratelimit.test.js test/plagiarism.test.js test/exams.test.js test/exam-import.test.js test/exam-program.test.js test/exam-leaderboard.test.js test/contests.test.js test/sandbox.test.js test/init-password.test.js test/frontend-markdown.test.js test/frontend-api.test.js",
+    "test": "node --test test/scorer.test.js test/compare.test.js test/ratelimit.test.js test/plagiarism.test.js test/exams.test.js test/exam-import.test.js test/exam-program.test.js test/exam-leaderboard.test.js test/contests.test.js test/sandbox.test.js test/init-password.test.js test/frontend-markdown.test.js test/frontend-api.test.js test/groups.test.js",
     "test:server": "node --test --test-concurrency=1 test/security.test.js test/reset-login.test.js"
   },
   "dependencies": {

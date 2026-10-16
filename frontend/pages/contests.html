@@ -59,7 +59,17 @@
             </div>
           `;
         }).join('');
-      } catch (err) { console.error(err); }
+      } catch (err) {
+        // 403 = 比赛存在但当前用户不在可见用户组内，展示后端 message 原文
+        if (err.status === 403) {
+          const box = document.getElementById('empty');
+          box.innerHTML = `<p class="text-red-500 dark:text-red-400">${escapeHtml(err.message) || '无权访问'}</p>`;
+          box.classList.remove('hidden');
+          document.getElementById('contestList').innerHTML = '';
+          return;
+        }
+        console.error(err);
+      }
     }
     loadContests();
   </script>

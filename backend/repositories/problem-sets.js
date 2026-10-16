@@ -104,6 +104,12 @@ function update(id, u) {
   db.prepare(`UPDATE problem_sets SET ${u.clause} WHERE id = ?`).run(...u.values, id);
 }
 
+// 实体可见性（用户组维度）：仅由 routes/_visibility.js 的 PUT 写入，值受 CHECK 约束
+// （problem_sets 表无 updated_at 列，故不触碰更新时间）
+function setVisibility(id, visibility) {
+  db.prepare('UPDATE problem_sets SET visibility = ? WHERE id = ?').run(visibility, id);
+}
+
 function findMissingProblemIds(ids) {
   const existsStmt = db.prepare('SELECT 1 FROM problems WHERE id = ?');
   return ids.filter(id => !existsStmt.get(id));
@@ -147,6 +153,6 @@ function recordProgress(userId, setId, problemId) {
 
 module.exports = {
   countList, list, countSolvedBySets, listMine, getWithCreator, listProblems,
-  get, getRow, listProgress, createPersonalSet, createPublicSet, update,
+  get, getRow, listProgress, createPersonalSet, createPublicSet, update, setVisibility,
   findMissingProblemIds, replaceProblems, deleteSet, getSetItem, userHasAccepted, recordProgress
 };

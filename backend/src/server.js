@@ -202,6 +202,7 @@ async function main() {
   const aiHintRoutes = require('../routes/aiHint');
   const statusRoutes = require('../routes/status');
   const examRoutes = require('../routes/exams');
+  const groupRoutes = require('../routes/groups');
 
   app.use('/api/v1/auth', authRoutes);
   app.use('/api/v1/problems', problemRoutes);
@@ -225,6 +226,7 @@ async function main() {
   app.use('/api/v1/problems', aiHintRoutes);
   app.use('/api/v1/system', statusRoutes);
   app.use('/api/v1/exams', examRoutes);
+  app.use('/api/v1/groups', groupRoutes);
 
   const routeList = [
     ['/api/v1/auth', '认证'],

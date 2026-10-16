@@ -4,9 +4,10 @@ const { optionalAuth } = require('../../middleware/auth');
 const { fromSqliteUtc, toSqliteUtc, resolveFreeze } = require('../../utils/examWindow');
 const { pickBestAttempts, compareByScore, buildStandings } = require('../../utils/standings');
 const repo = require('../../repositories/exams');
+const { visibilityDeniedMessage, canView } = require('../_visibility');
 const { clampInt } = require('./helpers');
 
-const { sendNotFound } = require('../../utils/apiErrors');
+const { sendNotFound, sendForbidden } = require('../../utils/apiErrors');
 
 const router = express.Router();
 
@@ -22,6 +23,10 @@ router.get('/:id/leaderboard', optionalAuth, (req, res) => {
   }
   if (!exam.is_public && !staff) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Exam is not public.' });
+  }
+  // 实体可见性（用户组）：组外用户不得读榜（含题目 id 与排名）
+  if (!canView(req, 'exam', exam.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('exam'));
   }
   if (!exam.leaderboard_enabled) {
     return sendNotFound(res, 'Leaderboard not found.');

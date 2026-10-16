@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS problems (
   difficulty INTEGER DEFAULT 0,
   is_public INTEGER DEFAULT 1,
   is_hidden INTEGER DEFAULT 0,
+  visibility TEXT NOT NULL DEFAULT 'public' CHECK(visibility IN ('public','groups')), -- public=全体可见 / groups=仅绑定组成员可见
   provider TEXT DEFAULT '',
   created_by INTEGER,
   exam_id INTEGER,  -- 非空 = 试卷内编程题（隔离于题库），EXAM_PROBLEM_ID_BASE 号段
@@ -163,6 +164,7 @@ CREATE TABLE IF NOT EXISTS contests (
   unfrozen INTEGER DEFAULT 0,
   unfrozen_at TEXT,
   is_hidden INTEGER DEFAULT 0,
+  visibility TEXT NOT NULL DEFAULT 'public' CHECK(visibility IN ('public','groups')), -- public=全体可见 / groups=仅绑定组成员可见
   created_by INTEGER,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (created_by) REFERENCES users(id)
@@ -175,6 +177,7 @@ CREATE TABLE IF NOT EXISTS problem_sets (
   creator_id INTEGER NOT NULL,
   is_public INTEGER DEFAULT 1,
   type TEXT DEFAULT 'public' CHECK(type IN ('public','personal')),
+  visibility TEXT NOT NULL DEFAULT 'public' CHECK(visibility IN ('public','groups')), -- public=全体可见 / groups=仅绑定组成员可见
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (creator_id) REFERENCES users(id)
 );
@@ -483,6 +486,7 @@ CREATE TABLE IF NOT EXISTS exams (
   show_answer INTEGER DEFAULT 0, -- 提交后是否显示答案
   is_public INTEGER DEFAULT 1,
   is_hidden INTEGER DEFAULT 0,
+  visibility TEXT NOT NULL DEFAULT 'public' CHECK(visibility IN ('public','groups')), -- public=全体可见 / groups=仅绑定组成员可见
   allow_ai_grading INTEGER DEFAULT 1, -- 是否允许 AI 评分主观题
   start_time TEXT,                 -- 开考时间（ISO8601，NULL=不限；期间外禁止作答）
   end_time TEXT,                   -- 结束时间（NULL=不限，且不参与自动封榜）
@@ -570,4 +574,52 @@ CREATE TABLE IF NOT EXISTS exam_attempts (
   FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+-- ═══════════════════════════════════════════════════════
+-- 用户组与实体可见性
+-- ═══════════════════════════════════════════════════════
+
+-- 用户组：kind=custom 管理员自建 / personal 用户个人组（每人一个）/ all_users 全体注册用户
+CREATE TABLE IF NOT EXISTS groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT 'custom' CHECK(kind IN ('custom','personal','all_users')),
+  owner_id INTEGER,
+  created_at TEXT NOT NULL
+);
+-- 个人组每人唯一一个
+CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_personal ON groups(owner_id) WHERE kind='personal';
+-- 全体组全局唯一一个
+CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_all_users ON groups(kind) WHERE kind='all_users';
+
+CREATE TABLE IF NOT EXISTS user_groups (
+  user_id INTEGER NOT NULL,
+  group_id INTEGER NOT NULL,
+  joined_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, group_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_groups_group ON user_groups(group_id);
+
+-- 实体与组的可见性绑定（实体 visibility='groups' 时才生效）
+CREATE TABLE IF NOT EXISTS resource_group_access (
+  resource_type TEXT NOT NULL CHECK(resource_type IN ('problem','contest','exam','problem_set')),
+  resource_id INTEGER NOT NULL,
+  group_id INTEGER NOT NULL,
+  PRIMARY KEY (resource_type, resource_id, group_id)
+);
+CREATE INDEX IF NOT EXISTS idx_rga_resource ON resource_group_access(resource_type, resource_id);
+
+-- 自动入组触发器：保证"以任何方式注册"都覆盖（注册接口、管理员建号、后台脚本、
+-- 测试直接 INSERT users），不依赖某一条注册代码路径的配合，避免漏发个人组/全体组。
+-- 用 OR IGNORE + 按唯一键回查组 id（而非 last_insert_rowid()）：users.id 可被复用
+-- （INTEGER PRIMARY KEY 非 AUTOINCREMENT，删号后重建会取回同号），重复入组不应让
+-- 注册语句因唯一索引冲突而失败；紧跟的 UPDATE 用于把复用同号时残留的旧用户名改回新用户名。
+CREATE TRIGGER IF NOT EXISTS trg_users_default_groups AFTER INSERT ON users
+BEGIN
+  INSERT OR IGNORE INTO groups (name, description, kind, owner_id, created_at) VALUES (NEW.username, '个人组', 'personal', NEW.id, datetime('now'));
+  UPDATE groups SET name = NEW.username WHERE kind = 'personal' AND owner_id = NEW.id;
+  INSERT OR IGNORE INTO user_groups (user_id, group_id, joined_at) SELECT NEW.id, id, datetime('now') FROM groups WHERE kind='personal' AND owner_id = NEW.id;
+  INSERT OR IGNORE INTO user_groups (user_id, group_id, joined_at) SELECT NEW.id, id, datetime('now') FROM groups WHERE kind='all_users';
+END;
 

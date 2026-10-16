@@ -9,11 +9,12 @@ const { sanitizeLog, banUserAndRevoke } = require('../../utils/securityHelpers')
 const { parsePageLimit } = require('../../utils/pagination');
 const { checkExamWindow } = require('../../utils/examWindow');
 const { problemVisibilityError } = require('../../utils/visibility');
+const { visibilityDeniedMessage, canView } = require('../_visibility');
 const { checkExamTimeLimit, startAttempt, SUBMIT_GRACE_MS } = require('../../utils/examAttempts');
 const config = require('../../config/config');
 const repo = require('../../repositories/submissions');
 
-const { sendNotFound } = require('../../utils/apiErrors');
+const { sendNotFound, sendForbidden } = require('../../utils/apiErrors');
 const { logInfo, logError } = require('../../utils/logger');
 
 const router = express.Router();
@@ -125,6 +126,10 @@ router.post('/', requireAuth, rateLimit, async (req, res) => {
   if (!problem.exam_id) {
     const verr = problemVisibilityError(problem, req);
     if (verr) return res.status(403).json(verr);
+    // 实体可见性（用户组）：组内题只允许绑定组成员提交，否则可借提交+判题回读测试数据
+    if (!canView(req, 'problem', problem.id)) {
+      return sendForbidden(res, visibilityDeniedMessage('problem'));
+    }
   }
 
   // ── 试卷编程题提交校验 ──
@@ -142,6 +147,10 @@ router.post('/', requireAuth, rateLimit, async (req, res) => {
     }
     if (exam.is_hidden && !['teacher', 'admin', 'su'].includes(req.user.role)) {
       return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Exam not found.' });
+    }
+    // 实体可见性（用户组）：试卷题随所属试卷可见性走，组外用户不得提交代码
+    if (!canView(req, 'exam', exam.id)) {
+      return sendForbidden(res, visibilityDeniedMessage('exam'));
     }
     // 时间窗门禁：开考前/结束后禁止提交代码（教师/管理员放行）
     const winMsg = checkExamWindow(exam, req.user);

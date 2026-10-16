@@ -623,3 +623,135 @@ function renderMathDefaults(rootEl) {
   } catch {}
 }
 
+// ── 实体可见性（用户组维度）─────────────────────────────
+// 契约：GET/PUT /api/v1/{problems|contests|exams|problem-sets}/:id/visibility
+//      GET /api/v1/groups  仅 admin/su 可用（批量拿组列表）
+// 只有 admin/su 能读写可见性；teacher 看不到控件、不发 PUT，实体保持 public。
+function canManageVisibility() {
+  const u = getUser();
+  return !!u && ['admin', 'su'].includes(u.role);
+}
+
+function visibilityKindText(kind) {
+  const texts = { custom: '自定义', personal: '个人组', all_users: '所有用户' };
+  return texts[kind] || kind || '自定义';
+}
+
+function visibilityGroupLabel(g) {
+  const owner = g.kind === 'personal' ? ` · 用户 #${g.owner_id}` : '';
+  return `${g.name || '未命名'}（${visibilityKindText(g.kind)}${owner}）`;
+}
+
+let visibilityGroupsCache = null;
+
+// 懒加载一次全站组列表；后端可能返回裸数组或 {groups:[...]}，两种都兼容
+async function ensureVisibilityGroups(force) {
+  if (visibilityGroupsCache && !force) return visibilityGroupsCache;
+  try {
+    const data = await apiCall('GET', '/groups');
+    visibilityGroupsCache = Array.isArray(data) ? data : (data.groups || data.data || []);
+  } catch (err) {
+    visibilityGroupsCache = [];
+    console.error(err);
+  }
+  return visibilityGroupsCache;
+}
+
+// 把组列表灌进 <select multiple>；keepSelection=true 时保留已勾选项
+async function loadVisibilityGroupOptions(selId, keepSelection) {
+  const sel = typeof selId === 'string' ? document.getElementById(selId) : selId;
+  if (!sel) return [];
+  const groups = await ensureVisibilityGroups(false);
+  if (keepSelection) {
+    const kept = new Set(Array.from(sel.selectedOptions).map(o => o.value));
+    sel.innerHTML = groups.map(g => `<option value="${g.id}"${kept.has(String(g.id)) ? ' selected' : ''}>${escapeHtml(visibilityGroupLabel(g))}</option>`).join('');
+  } else {
+    sel.innerHTML = groups.map(g => `<option value="${g.id}">${escapeHtml(visibilityGroupLabel(g))}</option>`).join('');
+  }
+  syncVisibilityGroupsInput(sel.dataset.visibilityRadio || '', sel.id);
+  return groups;
+}
+
+// 仅 admin/su 显示可见性控件（HTML 里默认 hidden）；不拉数据，避免与回填并发写同一个 select
+function showVisibilityControl(boxId, selId) {
+  const box = typeof boxId === 'string' ? document.getElementById(boxId) : boxId;
+  if (!box) return false;
+  if (!canManageVisibility()) { box.classList.add('hidden'); return false; }
+  box.classList.remove('hidden');
+  const sel = typeof selId === 'string' ? document.getElementById(selId) : selId;
+  syncVisibilityGroupsInput(sel ? sel.dataset.visibilityRadio : '', sel ? sel.id : '');
+  return true;
+}
+
+// 新建页/新建表单入口：显示控件 + 灌一次组选项 + 复位为“公开”
+async function initVisibilityControl(boxId, radioName, selId) {
+  if (!showVisibilityControl(boxId, selId)) return false;
+  await loadVisibilityGroupOptions(selId, false);
+  resetVisibilityControl(radioName, selId);
+  return true;
+}
+
+// radio 切到“公开”时禁用组多选，避免误提交
+function syncVisibilityGroupsInput(radioName, selId) {
+  const sel = typeof selId === 'string' ? document.getElementById(selId) : selId;
+  if (!sel || !radioName) return;
+  const checked = document.querySelector(`input[name="${radioName}"]:checked`);
+  const on = !!checked && checked.value === 'groups';
+  sel.disabled = !on;
+  sel.classList.toggle('hidden', !on);
+}
+
+// 回填：GET /:type/:id/visibility → {visibility, groups:[{id,...}]}
+async function loadEntityVisibility(type, id, radioName, selId) {
+  const sel = typeof selId === 'string' ? document.getElementById(selId) : selId;
+  if (sel) await loadVisibilityGroupOptions(sel, true);
+  try {
+    const data = await apiCall('GET', `/${type}/${id}/visibility`);
+    const vis = data && data.visibility === 'groups' ? 'groups' : 'public';
+    document.querySelectorAll(`input[name="${radioName}"]`).forEach(r => { r.checked = r.value === vis; });
+    if (sel) {
+      const ids = ((data && data.groups) || []).map(g => g.id);
+      Array.from(sel.options).forEach(o => { o.selected = ids.includes(parseInt(o.value, 10)); });
+    }
+    syncVisibilityGroupsInput(radioName, sel ? sel.id : selId);
+    return data;
+  } catch (err) {
+    console.error(err);
+    return null;
+  }
+}
+
+function collectVisibilityPayload(radioName, selId) {
+  const sel = typeof selId === 'string' ? document.getElementById(selId) : selId;
+  const checked = document.querySelector(`input[name="${radioName}"]:checked`);
+  const visibility = checked && checked.value === 'groups' ? 'groups' : 'public';
+  const groupIds = sel ? Array.from(sel.selectedOptions).map(o => parseInt(o.value, 10)).filter(n => !isNaN(n)) : [];
+  return { visibility, group_ids: visibility === 'groups' ? groupIds : [] };
+}
+
+// 主表单保存成功后调用；失败时 toast「主数据已保存，可见性设置失败」并返回 false
+async function saveEntityVisibility(type, id, radioName, selId) {
+  if (!canManageVisibility() || !id) return false;
+  const payload = collectVisibilityPayload(radioName, selId);
+  if (payload.visibility === 'groups' && payload.group_ids.length === 0) {
+    showToast('已选择“仅指定用户组”，但没有勾选任何用户组，可见性未保存', 'error');
+    return false;
+  }
+  try {
+    await apiCall('PUT', `/${type}/${id}/visibility`, payload);
+    return true;
+  } catch (err) {
+    showToast(`主数据已保存，可见性设置失败：${err.message || '操作失败'}`, 'error');
+    return false;
+  }
+}
+
+// 新建/重开表单时复位为“公开”
+function resetVisibilityControl(radioName, selId) {
+  const pub = document.querySelector(`input[name="${radioName}"][value="public"]`);
+  if (pub) pub.checked = true;
+  const sel = typeof selId === 'string' ? document.getElementById(selId) : selId;
+  if (sel) Array.from(sel.options).forEach(o => { o.selected = false; });
+  syncVisibilityGroupsInput(radioName, sel ? sel.id : selId);
+}
+

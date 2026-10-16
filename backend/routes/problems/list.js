@@ -5,10 +5,11 @@ const { parsePageLimit } = require('../../utils/pagination');
 const { isStaff } = require('../../utils/roles');
 // 题目可见性校验与提交接口共用（原为本文件私有，导致 POST /submissions 绕过校验）
 const { problemVisibilityError } = require('../../utils/visibility');
+const { visibilityFilterFor, visibilityDeniedMessage, canView } = require('../_visibility');
 const repo = require('../../repositories/problems');
 const { sanitizeProblem } = require('./helpers');
 
-const { sendNotFound } = require('../../utils/apiErrors');
+const { sendNotFound, sendForbidden } = require('../../utils/apiErrors');
 
 const router = express.Router();
 
@@ -17,8 +18,10 @@ router.get('/', optionalAuth, (req, res) => {
   const { page: pageNum, limit: limitNum, offset } = parsePageLimit(page, limit, 50, 100);
   // 隐藏题目仅对 teacher/admin/su 可见；管理角色可加 include_hidden=1 在列表中查看
   const isManager = !!(req.user && isStaff(req.user.role));
+  // 实体可见性（用户组）：非 staff 追加 public ∪ 命中绑定组的题目；staff 条件为空 → 不过滤
+  const visibilityFilter = visibilityFilterFor(req, 'problem');
   const { total, problems } = repo.listProblems({
-    search, tag, tags, category, difficulty, sort, order, isManager, limit: limitNum, offset
+    search, tag, tags, category, difficulty, sort, order, isManager, limit: limitNum, offset, visibilityFilter
   });
 
   if (problems.length > 0) {
@@ -66,6 +69,10 @@ router.get('/:id', optionalAuth, (req, res) => {
   const verr = problemVisibilityError(problem, req);
   if (verr) {
     return res.status(403).json(verr);
+  }
+  // 实体可见性（用户组）：visibility='groups' 的题目仅绑定组成员与 staff 可见（叠加在既有校验之上）
+  if (!canView(req, 'problem', problem.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('problem'));
   }
   // 管理角色或创建者返回完整视图（含 spj_code/scoring_script），其余走公开脱敏视图
   const isOwner = !!(req.user && req.user.id === problem.created_by);

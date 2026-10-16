@@ -5,11 +5,12 @@ const { parsePageLimit } = require('../../utils/pagination');
 const { sanitizeText } = require('../../utils/securityHelpers');
 const { normalizeExamTime, validateExamWindow, examWindowState, toSqliteUtc } = require('../../utils/examWindow');
 const { startAttempt } = require('../../utils/examAttempts');
+const { visibilityFilterFor, visibilityDeniedMessage, canView } = require('../_visibility');
 const repo = require('../../repositories/exams');
 const { clampInt } = require('./helpers');
 const { normalizeProgramQuestion } = require('./questions');
 
-const { sendNotFound } = require('../../utils/apiErrors');
+const { sendNotFound, sendForbidden } = require('../../utils/apiErrors');
 
 const router = express.Router();
 
@@ -19,7 +20,9 @@ router.get('/', optionalAuth, (req, res) => {
   const { page: pageNum, limit: limitNum, offset } = parsePageLimit(page, limit, 20, 100);
 
   const isStaff = !!req.user && ['teacher', 'admin', 'su'].includes(req.user.role);
-  const { total, exams } = repo.listExams({ isStaff, search, limit: limitNum, offset });
+  // 实体可见性（用户组）：staff 条件为空 → 不过滤；其余按 public ∪ 命中绑定组过滤
+  const visibilityFilter = visibilityFilterFor(req, 'exam');
+  const { total, exams } = repo.listExams({ isStaff, search, limit: limitNum, offset, visibilityFilter });
 
   res.json({ total, page: pageNum, limit: limitNum, exams });
 });
@@ -41,6 +44,11 @@ router.get('/:id', optionalAuth, (req, res) => {
   // 否则匿名用户可直链读取 is_public=0 试卷的全部题干与选项
   if (!exam.is_public && !isStaffUser) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Exam is not public.' });
+  }
+
+  // 实体可见性（用户组）：visibility='groups' 的试卷仅绑定组成员与 staff 可见（叠加在既有校验之上）
+  if (!canView(req, 'exam', exam.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('exam'));
   }
 
   // 时间窗：开考前对考生不可见（教师/管理员可预览）；结束后仍可查看结果

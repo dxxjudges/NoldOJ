@@ -6,9 +6,10 @@ const { checkExamWindow } = require('../../utils/examWindow');
 const { checkExamTimeLimit, SUBMIT_GRACE_MS } = require('../../utils/examAttempts');
 const examProgram = require('../../services/examProgram');
 const repo = require('../../repositories/exams');
+const { visibilityDeniedMessage, canView } = require('../_visibility');
 const { normalizeAnswer } = require('./helpers');
 
-const { sendNotFound } = require('../../utils/apiErrors');
+const { sendNotFound, sendForbidden } = require('../../utils/apiErrors');
 const { logError } = require('../../utils/logger');
 
 const router = express.Router();
@@ -25,6 +26,10 @@ router.post('/:id/submit', requireAuth, (req, res) => {
   }
   if (exam.is_hidden && !['teacher', 'admin', 'su'].includes(req.user.role)) {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Exam not found.' });
+  }
+  // 实体可见性（用户组）：组外用户不得交卷
+  if (!canView(req, 'exam', exam.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('exam'));
   }
 
   // 时间窗门禁：开考前/结束后禁止交卷（教师/管理员放行）

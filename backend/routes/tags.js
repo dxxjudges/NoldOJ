@@ -1,9 +1,12 @@
 const express = require('express');
 const tagsRepo = require('../repositories/tags');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, optionalAuth } = require('../middleware/auth');
 const { buildUpdates } = require('../utils/db');
+const { isStaff } = require('../utils/roles');
+const { filterViewableIds } = require('../utils/access');
+const { visibilityDeniedMessage, canView } = require('./_visibility');
 
-const { sendNotFound } = require('../utils/apiErrors');
+const { sendNotFound, sendForbidden } = require('../utils/apiErrors');
 
 const router = express.Router();
 
@@ -16,8 +19,19 @@ function validateColor(color) {
   return String(color);
 }
 
-router.get('/', (req, res) => {
+// 标签/分类的题目计数是否需要按可见性重算：teacher/admin/su 本就能看到全部题目
+function isStaffUser(user) {
+  return !!(user && isStaff(user.role));
+}
+
+router.get('/', optionalAuth, (req, res) => {
   const tags = tagsRepo.listTagsWithCount();
+  // 实体可见性（用户组）：problem_count 只统计当前用户可见的题目（组可见题的题目数不外泄）
+  if (!isStaffUser(req.user)) {
+    for (const tag of tags) {
+      tag.problem_count = filterViewableIds('problem', tagsRepo.listProblemIds(tag.id), req.user).length;
+    }
+  }
   res.json(tags);
 });
 
@@ -96,15 +110,23 @@ router.post('/problem/:problemId', requireAuth, requireRole('teacher'), (req, re
   res.json({ message: 'Tags updated.' });
 });
 
-router.get('/problem/:problemId', (req, res) => {
+// 组可见题的标签：不可见即 403（否则可借标签反推题目标题与存在性）
+router.get('/problem/:problemId', optionalAuth, (req, res) => {
+  if (!canView(req, 'problem', parseInt(req.params.problemId, 10))) {
+    return sendForbidden(res, visibilityDeniedMessage('problem'));
+  }
   const tags = tagsRepo.listProblemTags(req.params.problemId);
   res.json(tags);
 });
 
-router.get('/:id', (req, res) => {
+router.get('/:id', optionalAuth, (req, res) => {
   const tag = tagsRepo.getTag(req.params.id);
   if (!tag) {
     return sendNotFound(res, 'Tag not found.');
+  }
+  // 实体可见性（用户组）：标签本身是元数据，但 problem_count 会暴露组可见题的题目数
+  if (!isStaffUser(req.user)) {
+    tag.problem_count = filterViewableIds('problem', tagsRepo.listProblemIds(tag.id), req.user).length;
   }
   res.json(tag);
 });

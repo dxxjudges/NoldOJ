@@ -6,20 +6,34 @@ function getUserFavoritesPrivacy(targetId) {
   return db.prepare('SELECT id, hide_favorites FROM users WHERE id = ?').get(targetId);
 }
 
-function countByUser(userId) {
-  return db.prepare('SELECT COUNT(*) as c FROM user_favorites WHERE user_id = ?').get(userId).c;
+function countByUser(userId, filters) {
+  const vis = filters && filters.visibilityFilter;
+  let sql = 'SELECT COUNT(*) as c FROM user_favorites f JOIN problems p ON p.id = f.problem_id WHERE f.user_id = ?';
+  const params = [userId];
+  if (vis && vis.sql) {
+    sql += ` AND (${vis.sql})`;
+    params.push(...(vis.params || []));
+  }
+  return db.prepare(sql).get(...params).c;
 }
 
-function listByUser(viewerId, targetId, limit, offset) {
+// 实体可见性（用户组）由路由层注入 visibilityFilter（别名 p），缺省不追加条件，旧调用方行为不变
+function listByUser(viewerId, targetId, limit, offset, visibilityFilter) {
+  let where = 'WHERE f.user_id = ?';
+  const params = [viewerId, targetId];
+  if (visibilityFilter && visibilityFilter.sql) {
+    where += ` AND (${visibilityFilter.sql})`;
+    params.push(...(visibilityFilter.params || []));
+  }
   return db.prepare(`
     SELECT f.problem_id, p.title, p.difficulty, p.problem_type, f.created_at,
       EXISTS(SELECT 1 FROM submissions s WHERE s.problem_id = p.id AND s.user_id = ? AND s.status = 'accepted') as solved
     FROM user_favorites f
     JOIN problems p ON p.id = f.problem_id
-    WHERE f.user_id = ?
+    ${where}
     ORDER BY f.created_at DESC
     LIMIT ? OFFSET ?
-  `).all(viewerId, targetId, limit, offset);
+  `).all(...params, limit, offset);
 }
 
 // R9-10: IN 占位符数量上限由路由层截断后传入

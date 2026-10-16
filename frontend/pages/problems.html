@@ -173,7 +173,18 @@
           </tr>`).join('');
         const totalPages = Math.ceil(data.total / 20);
         renderPagination('pagination', totalPages, currentPage, 'loadProblems');
-      } catch (err) { console.error(err); }
+      } catch (err) {
+        // 403 = 实体存在但当前用户无权访问（如受限题目），按后端 message 原文提示，不伪装成“未找到”
+        if (err.status === 403) {
+          document.getElementById('problemList').innerHTML = '';
+          document.getElementById('pagination').innerHTML = '';
+          const box = document.getElementById('empty');
+          box.innerHTML = `<p class="text-red-500 dark:text-red-400">${escapeHtml(err.message) || '无权访问'}</p>`;
+          box.classList.remove('hidden');
+          return;
+        }
+        console.error(err);
+      }
     }
 
     readUrl();

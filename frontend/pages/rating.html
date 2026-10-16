@@ -96,7 +96,18 @@
         }).join('');
         const totalPages = Math.ceil(data.total / 20);
         renderPagination('pagination', totalPages, currentPage, 'loadRating');
-      } catch (err) { console.error(err); }
+      } catch (err) {
+        // 403 = 无权访问（如非管理员请求了 show_hidden），展示后端 message 原文
+        if (err.status === 403) {
+          document.getElementById('ratingList').innerHTML = '';
+          document.getElementById('pagination').innerHTML = '';
+          const box = document.getElementById('empty');
+          box.innerHTML = `<p class="text-red-500 dark:text-red-400">${escapeHtml(err.message) || '无权访问'}</p>`;
+          box.classList.remove('hidden');
+          return;
+        }
+        console.error(err);
+      }
     }
     loadRating();
   </script>

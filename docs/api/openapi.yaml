@@ -121,6 +121,11 @@ components:
         is_public:
           type: integer
           enum: [0, 1]
+        visibility:
+          type: string
+          enum: [public, groups]
+          default: public
+          description: 可见性（用户组维度）：public=所有人可见（匿名亦可）/ groups=仅绑定组成员与 teacher/admin/su 可见；仅 admin/su 可经 `PUT /problems/{id}/visibility` 修改
         provider:
           type: string
         created_at:
@@ -260,6 +265,11 @@ components:
           type: string
         is_virtual:
           type: integer
+        visibility:
+          type: string
+          enum: [public, groups]
+          default: public
+          description: 可见性（用户组维度）：public=所有人可见（匿名亦可）/ groups=仅绑定组成员与 teacher/admin/su 可见；仅 admin/su 可经 `PUT /contests/{id}/visibility` 修改
         created_by:
           type: integer
         created_at:
@@ -335,6 +345,79 @@ components:
         languages:
           type: integer
 
+    Group:
+      type: object
+      description: |
+        用户组。`kind=personal` 为个人组（每人一个，显示名=用户名、owner 为本人），
+        `kind=all_users` 为全体注册用户系统组；两者均由建号触发器自动加入，均不可改名/删除，成员不可自助变更。
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+        kind:
+          type: string
+          enum: [custom, personal, all_users]
+          description: custom=管理员自建 / personal=个人组 / all_users=所有用户系统组
+        owner_id:
+          type: integer
+          description: 组所有人（个人组为本人，全体组为 null）
+        member_count:
+          type: integer
+          description: 成员数
+        resource_count:
+          type: integer
+          description: 已绑定的实体（题目/比赛/试卷/题单）数量
+
+    GroupMember:
+      type: object
+      properties:
+        id:
+          type: integer
+        username:
+          type: string
+        nickname:
+          type: string
+        role:
+          type: string
+          enum: [user, teacher, admin, su]
+
+    VisibilityPayload:
+      type: object
+      required: [visibility]
+      properties:
+        visibility:
+          type: string
+          enum: [public, groups]
+          description: public=所有人可见 / groups=仅绑定组成员与 teacher/admin/su 可见
+        group_ids:
+          type: array
+          description: 绑定的组 id 列表；visibility=groups 时必填且至少一个，visibility=public 时可省略（传入则清空绑定）
+          items:
+            type: integer
+
+    VisibilityInfo:
+      type: object
+      description: 实体的可见性设置与生效绑定（绑定仅在 visibility=groups 时生效）
+      properties:
+        visibility:
+          type: string
+          enum: [public, groups]
+        groups:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+              kind:
+                type: string
+                enum: [custom, personal, all_users]
+
   parameters:
     PageParam:
       name: page
@@ -375,6 +458,12 @@ components:
             $ref: '#/components/schemas/Error'
     NotFound:
       description: 未找到
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: "状态错误（code 2, reason: ERR_INVALID_STATE）"
       content:
         application/json:
           schema:
@@ -1249,6 +1338,64 @@ paths:
       responses:
         '200':
           description: 查重报告
+
+  /problems/{id}/visibility:
+    get:
+      tags: [题目]
+      summary: 查看题目可见性（任意登录用户）
+      description: 返回 `visibility` 与生效的组绑定（绑定仅在 `visibility=groups` 时生效）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 可见性设置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisibilityInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [题目]
+      summary: 设置题目可见性（仅 admin/su）
+      description: |
+        仅 admin/su 可写，teacher 及以下一律 403（先判角色再判实体存在性，不借错误码探测实体是否存在）。
+        `visibility=groups` 时 `group_ids` 必填且至少一个，组不存在返回 400；`visibility=public` 时可省略 `group_ids`（传入则清空绑定）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VisibilityPayload'
+      responses:
+        '200':
+          description: 设置成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisibilityInfo'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: "权限不足（code 6, reason: ERR_FORBIDDEN）：仅管理员可修改可见性"
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   # ===== TAGS =====
   /tags:
@@ -2233,6 +2380,288 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  # ===== GROUPS =====
+  /groups:
+    get:
+      tags: [用户组]
+      summary: 用户组列表（仅 admin/su）
+      description: |
+        返回全部用户组（含「所有用户」「个人」两个系统组）及成员数、已绑定实体数。
+        组的新增/改名/删除/成员变更，以及实体可见性的写入，均只对 admin/su 开放。
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 用户组列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  groups:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Group'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [用户组]
+      summary: 创建用户组（仅 admin/su）
+      description: |
+        新建 `kind=custom` 的自定义组，`owner_id` 取当前管理员。系统组由建号触发器维护，不接受手工创建。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                  default: ""
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  group:
+                    $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /groups/mine:
+    get:
+      tags: [用户组]
+      summary: 我加入的组（任意登录用户）
+      description: 返回当前用户所属的组（含「所有用户」与个人组两个系统组），只含最小字段，不含其他用户的组信息。
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 我的组列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  groups:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Group'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /groups/{id}:
+    put:
+      tags: [用户组]
+      summary: 改名 / 改描述（仅 admin/su）
+      description: 至少传 `name` 或 `description` 之一。系统组（`personal` / `all_users`）一律 403。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  group:
+                    $ref: '#/components/schemas/Group'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: "权限不足（code 6, reason: ERR_FORBIDDEN）：系统组不可修改，或角色低于 admin"
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [用户组]
+      summary: 删除用户组（仅 admin/su）
+      description: |
+        组仍绑定实体且未带 `force` 时返回 409（`ERR_INVALID_STATE`），message 列出受影响的实体类型与数量；
+        带 `?force=1` 时先解绑并把「因本组消失而再无任何可见组」的实体回退为 `public` 再删组。系统组一律 403。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: force
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [1]
+          description: 传 `1` 时把受影响实体回退为公开后再删组（缺省不强制）
+      responses:
+        '200':
+          description: 删除成功（message 说明是否有实体被回退为公开）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '403':
+          description: "权限不足（code 6, reason: ERR_FORBIDDEN）：系统组不可删除，或角色低于 admin"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /groups/{id}/members:
+    get:
+      tags: [用户组]
+      summary: 组成员列表（仅 admin/su，分页）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+          description: 正整数，非法值返回 400（不做静默钳制）
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+          description: 正整数，上限 100
+      responses:
+        '200':
+          description: 组成员列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  members:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GroupMember'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [用户组]
+      summary: 添加组成员（仅 admin/su）
+      description: |
+        「所有用户」系统组的成员关系一律 403；个人组只允许 owner 本人（他人加入返回 400 `ERR_INVALID_STATE`）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id:
+                  type: integer
+      responses:
+        '200':
+          description: 添加成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '400':
+          description: "参数错误（code 1, reason: ERR_INVALID_ARGUMENT）或状态错误（code 2, reason: ERR_INVALID_STATE）"
+        '403':
+          description: "权限不足（code 6, reason: ERR_FORBIDDEN）：系统组成员不可手工变更，或角色低于 admin"
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /groups/{id}/members/{userId}:
+    delete:
+      tags: [用户组]
+      summary: 移出组成员（仅 admin/su）
+      description: 系统组（`personal` / `all_users`）的成员关系一律 403，不可自助退出这两个组。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 移出成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: "权限不足（code 6, reason: ERR_FORBIDDEN）：系统组成员不可手工变更，或角色低于 admin"
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ===== ACHIEVEMENTS =====
   /achievements:
     get:
@@ -2918,6 +3347,64 @@ paths:
         '200':
           description: 讨论列表
 
+  /contests/{id}/visibility:
+    get:
+      tags: [比赛]
+      summary: 查看比赛可见性（任意登录用户）
+      description: 返回 `visibility` 与生效的组绑定（绑定仅在 `visibility=groups` 时生效）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 可见性设置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisibilityInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [比赛]
+      summary: 设置比赛可见性（仅 admin/su）
+      description: |
+        仅 admin/su 可写，teacher 及以下一律 403（先判角色再判实体存在性，不借错误码探测实体是否存在）。
+        `visibility=groups` 时 `group_ids` 必填且至少一个，组不存在返回 400；`visibility=public` 时可省略 `group_ids`（传入则清空绑定）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VisibilityPayload'
+      responses:
+        '200':
+          description: 设置成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisibilityInfo'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: "权限不足（code 6, reason: ERR_FORBIDDEN）：仅管理员可修改可见性"
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ===== EXAMS =====
   /exams:
     get:
@@ -3151,6 +3638,65 @@ paths:
           description: 排行榜（含 my 本人名次）
         '403':
           description: 完成考试后可查看排行榜
+
+  /exams/{id}/visibility:
+    get:
+      tags: [试卷]
+      summary: 查看试卷可见性（任意登录用户）
+      description: 返回 `visibility` 与生效的组绑定（绑定仅在 `visibility=groups` 时生效）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 可见性设置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisibilityInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [试卷]
+      summary: 设置试卷可见性（仅 admin/su）
+      description: |
+        仅 admin/su 可写，teacher 及以下一律 403（先判角色再判实体存在性，不借错误码探测实体是否存在）。
+        `visibility=groups` 时 `group_ids` 必填且至少一个，组不存在返回 400；`visibility=public` 时可省略 `group_ids`（传入则清空绑定）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VisibilityPayload'
+      responses:
+        '200':
+          description: 设置成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisibilityInfo'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: "权限不足（code 6, reason: ERR_FORBIDDEN）：仅管理员可修改可见性"
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ===== SYSTEM =====
   /system/status:
     get:
@@ -3920,6 +4466,64 @@ paths:
       responses:
         '200':
           description: 标记成功
+
+  /problem-sets/{id}/visibility:
+    get:
+      tags: [题单]
+      summary: 查看题单可见性（任意登录用户）
+      description: 返回 `visibility` 与生效的组绑定（绑定仅在 `visibility=groups` 时生效）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 可见性设置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisibilityInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [题单]
+      summary: 设置题单可见性（仅 admin/su）
+      description: |
+        仅 admin/su 可写，teacher 及以下一律 403（先判角色再判实体存在性，不借错误码探测实体是否存在）。
+        `visibility=groups` 时 `group_ids` 必填且至少一个，组不存在返回 400；`visibility=public` 时可省略 `group_ids`（传入则清空绑定）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VisibilityPayload'
+      responses:
+        '200':
+          description: 设置成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisibilityInfo'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: "权限不足（code 6, reason: ERR_FORBIDDEN）：仅管理员可修改可见性"
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   # ===== VIRTUAL CONTESTS =====
   /virtual-contests/{id}:

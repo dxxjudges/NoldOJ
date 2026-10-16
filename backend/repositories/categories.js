@@ -53,7 +53,13 @@ function removeProblem(problemId, categoryId) {
   db.prepare('DELETE FROM problem_categories WHERE problem_id = ? AND category_id = ?').run(problemId, categoryId);
 }
 
+// 分类下的题目 id：分类接口要按"当前用户可见的题目"统计（见 routes/categories.js）
+function listProblemIds(categoryId) {
+  return db.prepare('SELECT problem_id FROM problem_categories WHERE category_id = ? ORDER BY problem_id')
+    .all(categoryId).map(r => r.problem_id);
+}
+
 module.exports = {
   listCategoriesWithCount, getCategory, findCategory, findByName, insertCategory, updateCategory,
-  deleteProblemCategories, deleteCategory, findProblem, addProblem, removeProblem
+  deleteProblemCategories, deleteCategory, findProblem, addProblem, removeProblem, listProblemIds
 };

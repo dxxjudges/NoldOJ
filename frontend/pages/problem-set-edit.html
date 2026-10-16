@@ -26,6 +26,15 @@
         <input id="psPublic" type="checkbox" checked class="w-4 h-4 text-indigo-600 rounded">
         <label for="psPublic" class="ml-2 text-sm text-gray-700 dark:text-gray-300">公开</label>
       </div>
+      <div id="psVisibilityBox" class="hidden">
+        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">可见性（仅管理员/超级管理员可设置）</label>
+        <div class="flex items-center gap-4 mb-2">
+          <label class="flex items-center gap-2"><input type="radio" name="psVisibility" value="public" checked onchange="syncVisibilityGroupsInput('psVisibility', 'psVisibilityGroups')" class="w-4 h-4 text-indigo-600 rounded"><span class="text-sm text-gray-700 dark:text-gray-300">公开</span></label>
+          <label class="flex items-center gap-2"><input type="radio" name="psVisibility" value="groups" onchange="syncVisibilityGroupsInput('psVisibility', 'psVisibilityGroups')" class="w-4 h-4 text-indigo-600 rounded"><span class="text-sm text-gray-700 dark:text-gray-300">仅指定用户组</span></label>
+        </div>
+        <select id="psVisibilityGroups" multiple data-visibility-radio="psVisibility" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm dark:bg-gray-700 dark:text-white min-h-[80px]" aria-label="可见用户组（按住 Ctrl/Cmd 多选）"></select>
+        <p class="text-xs text-gray-400 mt-1">与上方「公开」并列的新维度；选“仅指定用户组”时至少勾选一个组。</p>
+      </div>
       <div>
         <label for="psProblems" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">题目列表（每行一个题目 ID）</label>
         <textarea id="psProblems" rows="6" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-700 dark:text-white font-mono text-sm" placeholder="1&#10;2&#10;3"></textarea>
@@ -47,6 +56,8 @@
     let existingSet = null;
 
     (async function init() {
+      // 可见性控件仅 admin/su 可见；其他角色保存时不发 PUT，题单保持公开
+      initVisibilityControl('psVisibilityBox', 'psVisibility', 'psVisibilityGroups');
       if (!sid) return;
       try {
         existingSet = await apiCall('GET', `/problem-sets/${sid}`);
@@ -56,6 +67,10 @@
         document.getElementById('psPublic').checked = !!existingSet.is_public;
         document.getElementById('psProblems').value = (existingSet.problems || []).map(p => p.id).join('\n');
         document.getElementById('delBtn').classList.remove('hidden');
+        // 可见性回填（仅 admin/su）
+        if (canManageVisibility()) {
+          await loadEntityVisibility('problem-sets', sid, 'psVisibility', 'psVisibilityGroups');
+        }
       } catch (err) {
         showToast(err.message || '加载题单失败', 'error');
         setTimeout(() => { window.location.href = '/pages/problem-sets.html'; }, 900);
@@ -70,15 +85,20 @@
       const problemIds = document.getElementById('psProblems').value
         .split('\n').map(s => parseInt(s.trim())).filter(n => n > 0);
       try {
+        let setId = sid;
         if (sid) {
           await apiCall('PUT', `/problem-sets/${sid}`, { title, description, is_public });
           await apiCall('PUT', `/problem-sets/${sid}/problems`, { problemIds });
         } else {
           const created = await apiCall('POST', '/problem-sets', { title, description, is_public, problemIds });
-          window.location.href = `/pages/problem-set.html?id=${created.id}`;
-          return;
+          setId = created && created.id;
         }
-        window.location.href = `/pages/problem-set.html?id=${sid}`;
+        // 题单主数据已保存，再补可见性（失败仅 toast 提示「主数据已保存，可见性设置失败」，不回滚）
+        let visFailed = false;
+        if (setId) visFailed = !await saveEntityVisibility('problem-sets', setId, 'psVisibility', 'psVisibilityGroups');
+        // 可见性没设成功时先停一下，让 toast 被看清再跳转
+        if (canManageVisibility() && visFailed) await new Promise(r => setTimeout(r, 1800));
+        window.location.href = `/pages/problem-set.html?id=${setId}`;
       } catch (err) { showToast(err.message || '保存失败', 'error'); }
     }
 

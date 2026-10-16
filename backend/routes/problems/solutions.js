@@ -4,9 +4,9 @@ const { requireAuth, requireRole, optionalAuth } = require('../../middleware/aut
 const { isStaff } = require('../../utils/roles');
 // 题目可见性校验与提交接口共用（原为本文件私有，导致 POST /submissions 绕过校验）
 const { problemVisibilityError } = require('../../utils/visibility');
+const { visibilityDeniedMessage, canView } = require('../_visibility');
+const { sendNotFound, sendForbidden } = require('../../utils/apiErrors');
 const repo = require('../../repositories/problems');
-
-const { sendNotFound } = require('../../utils/apiErrors');
 
 const router = express.Router();
 
@@ -20,6 +20,10 @@ router.get('/:id/solutions', optionalAuth, (req, res) => {
   const verr = problemVisibilityError(problem, req);
   if (verr) {
     return res.status(403).json(verr);
+  }
+  // 实体可见性（用户组）：组内题的题解列表同样只对绑定组成员与 staff 开放
+  if (!canView(req, 'problem', problem.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('problem'));
   }
   const solutions = repo.listSolutions(problem.id);
   const staff = !!req.user && isStaff(req.user.role);

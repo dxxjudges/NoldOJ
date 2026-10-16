@@ -1,6 +1,7 @@
 const express = require('express');
 const statisticsRepo = require('../repositories/statistics');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, optionalAuth } = require('../middleware/auth');
+const { visibilityFilterFor } = require('./_visibility');
 const { canViewUserData } = require('../utils/roles');
 
 const { sendNotFound } = require('../utils/apiErrors');
@@ -61,8 +62,9 @@ router.get('/me/stats', requireAuth, (req, res) => {
 });
 
 // 提交云图：按题目统计提交次数，用于词云渲染
-router.get('/wordcloud', (req, res) => {
-  const rows = statisticsRepo.getWordcloud();
+// 实体可见性（用户组）：匿名可访问，但词云只统计当前用户可见的题目
+router.get('/wordcloud', optionalAuth, (req, res) => {
+  const rows = statisticsRepo.getWordcloud({ visibilityFilter: visibilityFilterFor(req, 'problem') });
   res.json(rows);
 });
 
