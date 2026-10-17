@@ -4,11 +4,20 @@
 // 破坏系统组的写操作：改名 / 删除 / 改成员关系一律抛 ERR_INVALID_STATE，由路由层转 400。
 const db = require('../database/db');
 const { deleteGroupResourceRefs } = require('./resourceAccess');
+const usersRepo = require('./users');
+const { sanitizeLog } = require('../utils/securityHelpers');
 
 const SYSTEM_KINDS = new Set(['personal', 'all_users']);
 const ALL_USERS_GROUP_NAME = '所有用户';
 const ALL_USERS_GROUP_DESC = '系统默认组，所有注册用户自动加入';
 const PERSONAL_GROUP_DESC = '个人组';
+
+// 批量导入：单次行数上限（与路由层校验同源，防止绕过路由直接调用仓储）
+const IMPORT_MAX_ROWS = 500;
+// 用户名字符集：与 routes/users.js 建号口径逐字一致（字母 / 数字 / 下划线 / 点 / 短横线）
+const USERNAME_PATTERN = /^[a-zA-Z0-9_.-]+$/;
+// 失败原因回给前端前的长度上限，避免把整段内部 SQL 错误原文搬出去
+const FAILED_REASON_MAX = 200;
 
 // 组统计子查询（成员数 / 已绑定实体数）——组列表与"我的组"共用
 const GROUP_STATS_SQL = `
@@ -195,8 +204,68 @@ function removeMember(groupId, userId) {
   return res.changes;
 }
 
+// 批量导入成员（Excel 已由前端解析为结构化行，这里只处理数据）：
+// 逐行事务 —— 「未注册则建号」与「加入组」必须同事务，否则会留下「用户建了却没进组」
+// 「进组了却没建号」的中间态（中途失败时该行整体回滚，只计入 failed[]，整单仍然 200）。
+// BEGIN→COMMIT 之间全为同步语句、无 await，单连接不会被其他请求串入事务（与 deleteGroup 同款）。
+// 自动注册的角色恒为 'user'：请求体不接受角色字段，避免批量导入顺带造出 admin/su。
+// 幂等：已在组内则 INSERT OR IGNORE 不生效（changes=0），计入 skipped 而非失败。
+function importMembersIntoGroup({ groupId, entries, passwordHash, limit } = {}) {
+  const group = getGroup(groupId);
+  if (!group) throw notFound('用户组不存在。');
+  if (isSystemGroup(group.kind)) throw invalidState('系统组不可导入成员。');
+
+  const max = Number.isInteger(limit) && limit > 0 ? limit : IMPORT_MAX_ROWS;
+  const result = { total: 0, added: 0, registered: 0, skipped: 0, failed: [] };
+  const seen = new Set();
+
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    if (result.total >= max) break;
+    const rawName = entry && entry.username !== undefined && entry.username !== null ? entry.username : '';
+    const username = String(rawName).trim();
+    // 文件内重复 username：保留首次出现
+    if (seen.has(username)) continue;
+    seen.add(username);
+    result.total++;
+
+    if (!USERNAME_PATTERN.test(username)) {
+      result.failed.push({ username, reason: '用户名不合法：仅允许字母、数字、下划线、点和短横线。' });
+      continue;
+    }
+    const rawNickname = entry && entry.nickname !== undefined && entry.nickname !== null ? entry.nickname : '';
+    const nickname = String(rawNickname).trim() || username;
+
+    try {
+      db.exec('BEGIN');
+      const existing = usersRepo.findUserByUsername(username);
+      const created = !existing;
+      const userId = created ? usersRepo.createUser(username, passwordHash, nickname, 'user') : existing.id;
+      const ins = db.prepare("INSERT OR IGNORE INTO user_groups (user_id, group_id, joined_at) VALUES (?, ?, datetime('now'))")
+        .run(userId, groupId);
+      db.exec('COMMIT');
+      if (ins.changes === 0) {
+        result.skipped++;
+      } else {
+        result.added++;
+        if (created) result.registered++;
+      }
+    } catch (e) {
+      try { db.exec('ROLLBACK'); } catch { /* 回滚失败不掩盖原始错误（外层已记入 failed 并继续下一行） */ }
+      result.failed.push({ username, reason: shortReason(e) });
+    }
+  }
+  return result;
+}
+
+// 失败原因：脱敏 + 截断，避免把内部 SQL 细节/敏感片段整段回给前端
+function shortReason(err) {
+  const text = String(sanitizeLog((err && err.message) || '导入失败。')).trim() || '导入失败。';
+  return text.length > FAILED_REASON_MAX ? `${text.slice(0, FAILED_REASON_MAX)}…` : text;
+}
+
 module.exports = {
   ensureAllUsersGroup, getAllUsersGroup, ensurePersonalGroup, getPersonalGroup, ensureDefaultMembership,
   createGroup, updateGroup, listGroups, getGroup, listUserGroups, listGroupMembers,
-  addMember, removeMember, deleteGroup, countGroups, isSystemGroup
+  addMember, removeMember, deleteGroup, countGroups, isSystemGroup,
+  importMembersIntoGroup
 };

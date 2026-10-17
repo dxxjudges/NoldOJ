@@ -384,6 +384,65 @@ components:
           type: string
           enum: [user, teacher, admin, su]
 
+    ImportUsersPayload:
+      type: object
+      description: |
+        用户组成员的 Excel 批量导入请求体（前端解析 xlsx/xls 第一个 sheet 后提交），单次上限 500 行。
+        `default_password` 字段本身选填，但只要 `users` 中含有尚未注册的账号就必填，否则整单 400；
+        该密码仅用于本批次**新注册**的账号，作为它们的初始口令。
+      required: [users]
+      properties:
+        users:
+          type: array
+          description: 待加入本组的账号列表，去重后最多 500 条
+          items:
+            type: object
+            required: [username]
+            properties:
+              username:
+                type: string
+                description: 用户名（表中 `用户名` 列，支持 `username`/`账号` 别名），必填
+              nickname:
+                type: string
+                description: 昵称（表中 `昵称` 列，支持 `nickname`/`姓名` 别名），选填；留空时新注册账号回退为用户名
+        default_password:
+          type: string
+          format: password
+          description: |
+            默认密码，操作者在导入前输入并确认，不回显、不落盘到任何文件。强度要求 ≥8 位且含字母与数字或符号
+            （与管理员建号一致）；存在未注册账号而缺此字段、或口令不合规时整单 400。
+
+    ImportResult:
+      type: object
+      description: |
+        导入结果汇总，界面按「共 N 行：新增成员 X 人（其中自动注册 Y 人），已在组内 Z 人」展示。
+        行级失败不影响其它行成功，`failed` 逐条给出「用户名: 原因」。
+      properties:
+        total:
+          type: integer
+          description: 本次提交的用户名总数（去重后）
+        added:
+          type: integer
+          description: 本次新增进该组的成员数（含已存在的账号与自动注册的账号）
+        registered:
+          type: integer
+          description: 其中由本次导入自动注册的账号数（角色固定 `user`），不超过 `added`
+        skipped:
+          type: integer
+          description: 早已在该组内、无需重复加入的人数
+        failed:
+          type: array
+          description: 失败行明细；为空数组表示全部成功
+          items:
+            type: object
+            properties:
+              username:
+                type: string
+                description: 失败行的用户名
+              reason:
+                type: string
+                description: 失败原因，面向管理员的可读说明
+
     VisibilityPayload:
       type: object
       required: [visibility]
@@ -2540,6 +2599,54 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+
+  /groups/{id}/import:
+    post:
+      tags: [用户组]
+      summary: Excel 批量导入组成员（仅 su）
+      description: |
+        管理面板「用户组」tab 的「Excel 导入」按钮调用的接口。前端已把 xlsx/xls 的**第一个 sheet** 解析成 `users` 数组
+        再提交：列 `用户名`（必填）与 `昵称`（选填），支持 `username`/`账号`、`nickname`/`姓名` 别名，其余列忽略；
+        首行未被识别为表头时按固定列序「用户名|昵称」读取；文件内重复用户名已去重。单次上限 500 行。
+
+        约束：
+        - **仅超级管理员（su）**：admin 及以下一律 403；前端同时禁用按钮并提示「含未注册用户自动注册，需超级管理员」。
+        - **仅自定义组可导入**：个人组（`kind=personal`）与「所有用户」系统组（`kind=all_users`）一律 403。
+        - **自动注册**：`users` 中尚不存在的账号会被自动注册，角色固定为 `user`——**不解析文件里的角色，无法借此提权**。
+        - **默认密码**：由操作者在导入前输入并确认，不回显、不写入文件，作为**本批次全部新注册账号**的初始口令；
+          要求 ≥8 位且含字母与数字或符号（与管理员建号强度一致），不满足则整单拒绝 400。
+
+        失败分两级：行级失败（用户名非法等）不影响其它行成功，逐条列入 `failed`；整单级错误（行数超限、存在未注册账号但缺
+        `default_password`、默认密码不合规）整个请求被拒 400，不会写入任何数据。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportUsersPayload'
+      responses:
+        '200':
+          description: 导入完成（部分行失败仍返回 200，失败明细见 `failed`）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /groups/{id}/members:
     get:

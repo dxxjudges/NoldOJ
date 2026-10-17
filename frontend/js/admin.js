@@ -15,7 +15,7 @@
         btn.setAttribute('aria-selected', String(t === tab));
       });
       if (tab === 'users') { loadUsers(); initUserAdminTools(); }
-      if (tab === 'groups') loadUserGroups();
+      if (tab === 'groups') { loadUserGroups(); initUserGroupImportTools(); }
       if (tab === 'articles') loadAdminArticles();
       if (tab === 'files') loadAdminFiles();
       if (tab === 'contests') loadContests();
@@ -1546,6 +1546,7 @@ async function banUser(id) { try { await apiCall('POST', `/users/${id}/ban`); lo
 
     function renderUserGroups() {
       const tbody = document.getElementById('userGroupList');
+      renderUserGroupImportTargets();
       if (!tbody) return;
       if (userGroupsCache.length === 0) {
         tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-6 text-center text-sm text-gray-400 dark:text-gray-500 dark:text-gray-400">暂无用户组</td></tr>';
@@ -1738,6 +1739,281 @@ async function banUser(id) { try { await apiCall('POST', `/users/${id}/ban`); lo
       } catch (err) { showToast(err.message || '操作失败', 'error'); }
     }
 
+    // ── 用户组 Excel 导入（契约：POST /groups/:id/import，仅超级管理员）────────────
+    const USER_GROUP_IMPORT_MAX = 500;
+    const USER_GROUP_IMPORT_SU_TIP = '含未注册用户自动注册，需超级管理员';
+    const USER_GROUP_IMPORT_PWD_RULE = '至少 8 位，且须同时包含字母与数字（或字母与符号）';
+    const USER_GROUP_IMPORT_USERNAME_RE = /^[a-zA-Z0-9_.-]+$/;
+    // 表头别名：与 group-sample.xlsx「填写说明」一致（用户名/username/账号、昵称/nickname/姓名）
+    const USER_GROUP_HEADER_ALIAS = {
+      username: 'username', '用户名': 'username', '账号': 'username',
+      nickname: 'nickname', '昵称': 'nickname', '姓名': 'nickname'
+    };
+    let userGroupImportRows = [];
+    let userGroupImportGroupId = null;
+    let userGroupImportSubmitting = false;
+
+    function userGroupImportAllowed() {
+      const me = getUser();
+      return !!me && me.role === 'su';
+    }
+
+    // admin/su 可见该工具条；admin 的「Excel 导入」渲染为 disabled + title 说明原因，
+    // 其它角色（理论上进不了本 tab）整块不渲染
+    function initUserGroupImportTools() {
+      const tools = document.getElementById('userGroupImportTools');
+      if (!tools) return;
+      const me = getUser();
+      const role = me && me.role;
+      if (role !== 'su' && role !== 'admin') { tools.classList.add('hidden'); return; }
+      tools.classList.remove('hidden');
+      tools.classList.add('flex');
+      // 目标组下拉只有 su 用得上
+      const label = document.getElementById('userGroupImportGroupLabel');
+      const sel = document.getElementById('userGroupImportGroup');
+      if (label) label.classList.toggle('hidden', role !== 'su');
+      if (sel) sel.classList.toggle('hidden', role !== 'su');
+      paintUserGroupImportBtn(false);
+    }
+
+    function paintUserGroupImportBtn(busy) {
+      const btn = document.getElementById('userGroupImportBtn');
+      if (!btn) return;
+      const su = userGroupImportAllowed();
+      btn.disabled = !!busy || !su;
+      btn.classList.toggle('opacity-40', !su);
+      btn.classList.toggle('cursor-not-allowed', !su || !!busy);
+      btn.textContent = busy ? '解析中...' : 'Excel 导入';
+      if (su) btn.removeAttribute('title');
+      else btn.title = USER_GROUP_IMPORT_SU_TIP;
+    }
+
+    // 导入目标组来自工具条下拉（接口是按组的），只列自定义组：系统组不可导入
+    function renderUserGroupImportTargets() {
+      const sel = document.getElementById('userGroupImportGroup');
+      if (!sel) return;
+      const prev = sel.value;
+      const options = userGroupsCache.filter(g => !isSystemUserGroup(g));
+      sel.innerHTML = options.length
+        ? options.map(g => `<option value="${g.id}">${escapeHtml(g.name || '')} (#${g.id})</option>`).join('')
+        : '<option value="">暂无可导入的自定义组</option>';
+      if (prev && options.some(g => String(g.id) === prev)) sel.value = prev;
+    }
+
+    function userGroupImportTargetId() {
+      const sel = document.getElementById('userGroupImportGroup');
+      const raw = sel ? String(sel.value || '') : '';
+      if (!/^\d+$/.test(raw)) return null;
+      const gid = parseInt(raw, 10);
+      return gid > 0 ? gid : null;
+    }
+
+    // 与后端 default_password 同规则：≥8 位、含字母，且含数字或符号
+    function isStrongUserGroupImportPwd(pw) {
+      if (!pw || pw.length < 8) return false;
+      if (!/[a-zA-Z]/.test(pw)) return false;
+      return /\d/.test(pw) || /[^a-zA-Z0-9]/.test(pw);
+    }
+
+    // file input onchange 入口：解析 + 本地清洗/预检，通过后再问默认密码（绝不上传文件）
+    async function handleUserGroupImportFile(input) {
+      const file = input.files && input.files[0];
+      input.value = '';
+      if (!file) return;
+      if (!userGroupImportAllowed()) { showToast(USER_GROUP_IMPORT_SU_TIP, 'error'); return; }
+      if (typeof XLSX === 'undefined') { showToast('Excel 解析库未加载, 请检查网络后刷新重试', 'error'); return; }
+      const gid = userGroupImportTargetId();
+      if (!gid) { showToast('请先在「目标组」中选择要导入的用户组', 'info'); return; }
+      const g = userGroupsCache.find(x => x.id === gid);
+      if (isSystemUserGroup(g)) { showToast(USER_GROUP_SYSTEM_TIP, 'error'); return; }
+
+      paintUserGroupImportBtn(true);
+      try {
+        const buf = await file.arrayBuffer();
+        const wb = XLSX.read(buf, { type: 'array' });
+        // 导入器只读第一个 sheet
+        const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+        if (!rows.length) { showToast('表格为空', 'error'); return; }
+
+        // 表头映射: 首行按列名识别; 无法识别表头时按固定列序 用户名|昵称
+        let map = {};
+        const head = rows[0].map(c => String(c).trim().toLowerCase());
+        const recognized = head.some(h => USER_GROUP_HEADER_ALIAS[h]);
+        if (recognized) {
+          head.forEach((h, i) => { if (USER_GROUP_HEADER_ALIAS[h]) map[USER_GROUP_HEADER_ALIAS[h]] = i; });
+        } else {
+          map = { username: 0, nickname: 1 };
+        }
+        if (map.username === undefined) { showToast('缺少「用户名」列', 'error'); return; }
+
+        // 行级清洗: 去空行、去重（保留首次）。本地能判的先给行号提示，
+        // 但非法用户名等仍照原样发给后端——注册与最终校验由后端说了算。
+        const users = [];
+        const seen = new Set();
+        const notices = [];
+        rows.slice(recognized ? 1 : 0).forEach((r, i) => {
+          const lineNo = (recognized ? 1 : 0) + i + 1;
+          const username = String(r[map.username] ?? '').trim();
+          const nickname = map.nickname !== undefined ? String(r[map.nickname] ?? '').trim() : '';
+          if (!username && !nickname) return;
+          if (!username) { notices.push(`第 ${lineNo} 行：缺少用户名，已跳过`); return; }
+          if (seen.has(username)) { notices.push(`第 ${lineNo} 行：用户名「${username}」重复，已保留首次出现的行`); return; }
+          seen.add(username);
+          if (!USER_GROUP_IMPORT_USERNAME_RE.test(username)) {
+            notices.push(`第 ${lineNo} 行：用户名「${username}」含非法字符（仅允许字母/数字/_/./-），仍会提交，由后端判失败`);
+          }
+          users.push(nickname ? { username, nickname } : { username });
+        });
+        if (!users.length) { showToast('未解析到有效数据行 (需要「用户名」列)', 'error'); return; }
+        if (users.length > USER_GROUP_IMPORT_MAX) {
+          showToast(`解析到 ${users.length} 行，超过单次导入上限 ${USER_GROUP_IMPORT_MAX} 行，请拆分后再导入`, 'error');
+          return;
+        }
+
+        userGroupImportRows = users;
+        userGroupImportGroupId = gid;
+        openUserGroupImportModal(gid, users, notices);
+      } catch (err) {
+        showToast('Excel 解析失败: ' + (err.message || err), 'error');
+      } finally {
+        paintUserGroupImportBtn(false);
+      }
+    }
+
+    function openUserGroupImportModal(gid, users, notices) {
+      const g = userGroupsCache.find(x => x.id === gid);
+      document.getElementById('groupImportModalTitle').textContent = `Excel 导入 - ${g ? g.name : '#' + gid}`;
+      document.getElementById('groupImportSummary').textContent =
+        `已解析 ${users.length} 行，目标用户组「${g ? g.name : '#' + gid}」；单次上限 ${USER_GROUP_IMPORT_MAX} 行。`;
+      const noticeBox = document.getElementById('groupImportNotices');
+      const list = notices || [];
+      noticeBox.classList.toggle('hidden', !list.length);
+      if (list.length) noticeBox.innerHTML = list.map(n => `<div>${escapeHtml(n)}</div>`).join('');
+      const pwd = document.getElementById('groupImportPassword');
+      const pwd2 = document.getElementById('groupImportPassword2');
+      pwd.value = '';
+      pwd2.value = '';
+      document.getElementById('groupImportModal').classList.remove('hidden');
+      document.addEventListener('keydown', onUserGroupImportKeydown);
+      updateUserGroupImportStrength();
+      pwd.focus();
+    }
+
+    function closeUserGroupImportModal() {
+      const modal = document.getElementById('groupImportModal');
+      if (modal) modal.classList.add('hidden');
+      document.removeEventListener('keydown', onUserGroupImportKeydown);
+      // 取消即丢弃本次解析结果，不发任何请求；顺带清掉 DOM 里的明文
+      userGroupImportRows = [];
+      userGroupImportGroupId = null;
+      const pwd = document.getElementById('groupImportPassword');
+      const pwd2 = document.getElementById('groupImportPassword2');
+      if (pwd) pwd.value = '';
+      if (pwd2) pwd2.value = '';
+      const noticeBox = document.getElementById('groupImportNotices');
+      if (noticeBox) { noticeBox.innerHTML = ''; noticeBox.classList.add('hidden'); }
+      paintUserGroupImportSubmitBtn(false);
+    }
+
+    function onUserGroupImportKeydown(e) {
+      if (e.key === 'Escape') { e.preventDefault(); closeUserGroupImportModal(); }
+    }
+
+    // 实时强度提示：两个输入框的 input 事件都调它；不合规/不一致时禁用确认按钮
+    function updateUserGroupImportStrength() {
+      const pwd = document.getElementById('groupImportPassword').value;
+      const pwd2 = document.getElementById('groupImportPassword2').value;
+      const hint = document.getElementById('groupImportStrength');
+      const touched = !!pwd || !!pwd2;
+      let ok = false;
+      let msg = `密码要求：${USER_GROUP_IMPORT_PWD_RULE}`;
+      if (touched) {
+        if (!isStrongUserGroupImportPwd(pwd)) msg = `密码强度不足：${USER_GROUP_IMPORT_PWD_RULE}`;
+        else if (pwd2 && pwd2 !== pwd) msg = '两次输入的密码不一致';
+        else if (!pwd2) msg = `强度合格，请再输入一次确认（${USER_GROUP_IMPORT_PWD_RULE}）`;
+        else { msg = '强度合格，可以开始导入'; ok = true; }
+      }
+      hint.textContent = msg;
+      hint.className = 'text-xs ' + (ok
+        ? 'text-green-600 dark:text-green-400'
+        : (touched ? 'text-red-500 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'));
+      paintUserGroupImportSubmitBtn(ok);
+    }
+
+    // 确认按钮：可提交才给 hover 反馈，禁用态统一 opacity-40 + not-allowed
+    function paintUserGroupImportSubmitBtn(ok) {
+      const btn = document.getElementById('groupImportSubmitBtn');
+      if (!btn) return;
+      const enabled = !!ok && !userGroupImportSubmitting;
+      btn.disabled = !enabled;
+      btn.className = 'px-4 py-2 text-white rounded-lg bg-indigo-600 ' +
+        (enabled ? 'hover:bg-indigo-700' : 'opacity-40 cursor-not-allowed');
+    }
+
+    function userGroupImportSummaryText(res) {
+      const total = (res && res.total) || 0;
+      const added = (res && res.added) || 0;
+      const registered = (res && res.registered) || 0;
+      const skipped = (res && res.skipped) || 0;
+      return `共 ${total} 行：新增成员 ${added} 人（其中自动注册 ${registered} 人），已在组内 ${skipped} 人`;
+    }
+
+    function renderUserGroupImportResult(res) {
+      const prog = document.getElementById('groupImportProgress');
+      if (!prog) return;
+      const failed = (res && Array.isArray(res.failed)) ? res.failed : [];
+      const summary = userGroupImportSummaryText(res);
+      prog.classList.remove('hidden');
+      prog.innerHTML = `<b>导入完成</b>: ${escapeHtml(summary)}` + (failed.length
+        ? `<br>失败 ${failed.length} 条:<br>` + failed.map(f =>
+          `<span class="text-red-500 dark:text-red-400">${escapeHtml(`${f.username || ''}: ${f.reason || '失败'}`)}</span>`).join('<br>')
+        : '');
+      showToast(failed.length
+        ? `${summary}\n失败 ${failed.length} 条，明细见下方结果框`
+        : summary, failed.length ? 'info' : 'success');
+    }
+
+    // 契约：{ users:[{username, nickname?}], default_password? }，整单 200/400，
+    // 行级失败在响应 failed 里，403 = 系统组 或 非 su
+    async function submitUserGroupImport() {
+      if (userGroupImportSubmitting) return;
+      const gid = userGroupImportGroupId;
+      const users = userGroupImportRows;
+      if (!gid || !users.length) { showToast('请先选择要导入的 Excel 文件', 'info'); return; }
+      const pwd = document.getElementById('groupImportPassword').value;
+      const pwd2 = document.getElementById('groupImportPassword2').value;
+      if (!isStrongUserGroupImportPwd(pwd)) { showToast(`默认密码强度不足：${USER_GROUP_IMPORT_PWD_RULE}`, 'error'); return; }
+      if (pwd !== pwd2) { showToast('两次输入的密码不一致', 'error'); return; }
+
+      const btn = document.getElementById('groupImportSubmitBtn');
+      userGroupImportSubmitting = true;
+      if (btn) { btn.disabled = true; btn.textContent = '导入中...'; }
+      try {
+        const res = await apiCall('POST', `/groups/${gid}/import`, { users, default_password: pwd });
+        closeUserGroupImportModal();
+        renderUserGroupImportResult(res);
+        await loadUserGroups();
+        if (currentUserGroupId === gid) loadUserGroupMembers();
+      } catch (err) {
+        // 契约 400：整单拒绝（空表/超限/未提供默认密码/密码强度不足），message 已是中文文案
+        if (err && err.status === 400) {
+          showToast(err.message || '导入参数不合法', 'error');
+        } else if (err && err.status === 403) {
+          const g = userGroupsCache.find(x => x.id === gid);
+          showToast(isSystemUserGroup(g)
+            ? '系统组不可导入（个人组与「所有用户」由系统维护）'
+            : (err.message || '需超级管理员权限才能导入'), 'error');
+        } else {
+          showToast(err.message || '导入失败', 'error');
+        }
+      } finally {
+        userGroupImportSubmitting = false;
+        if (btn) btn.textContent = '开始导入';
+        updateUserGroupImportStrength();
+      }
+    }
+
     loadAdminProblems();
     loadAllCategories();
     loadAllTags();
+    initUserGroupImportTools();

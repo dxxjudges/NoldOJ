@@ -75,6 +75,13 @@ module.exports = [
         collectVisibilityPayload: false,
         saveEntityVisibility: false,
         resetVisibilityControl: false,
+        // ── 用户组 Excel 导入（admin.js 定义，admin.html 内联 onclick/onchange 调用）──
+        initUserGroupImportTools: false,
+        handleUserGroupImportFile: false,
+        openUserGroupImportModal: false,
+        closeUserGroupImportModal: false,
+        updateUserGroupImportStrength: false,
+        submitUserGroupImport: false,
         // ── 由三方 <script> 注入的全局 ───────────────────────────
         DOMPurify: false, // js/purify.min.js
         XLSX: false, // js/xlsx.full.min.js

@@ -3,6 +3,7 @@
 // 本文件只做鉴权、参数校验与响应编排；系统组（personal / all_users）的保护语义由仓储抛
 // ERR_INVALID_STATE，这里统一转成 400/403，系统组改不动也删不掉。
 const express = require('express');
+const bcrypt = require('bcryptjs');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const groupsRepo = require('../repositories/groups');
 const usersRepo = require('../repositories/users');
@@ -13,6 +14,7 @@ const examsRepo = require('../repositories/exams');
 const problemSetsRepo = require('../repositories/problem-sets');
 
 const { sendNotFound, sendForbidden } = require('../utils/apiErrors');
+const { isStrongPassword } = require('../utils/validation');
 
 const router = express.Router();
 
@@ -35,6 +37,11 @@ const resourceNoun = {
 const NOT_FOUND = 'Group not found.';
 const MEMBERS_PAGE_SIZE = 20;
 const MEMBERS_MAX_LIMIT = 100;
+
+// 批量导入单次行数上限（与 repositories/groups.js 的 IMPORT_MAX_ROWS 同值）
+const IMPORT_MAX_ROWS = 500;
+// 用户名字符集：与 routes/users.js 建号口径一致
+const USERNAME_PATTERN = /^[a-zA-Z0-9_.-]+$/;
 
 // 组视图：字段与前端管理台契约逐字对齐（id/name/description/kind/owner_id/member_count/resource_count）
 function groupView(row) {
@@ -118,6 +125,46 @@ function describeRefs(refs) {
   return Array.from(byType.entries())
     .map(([type, count]) => `${resourceNoun[type] || type}: ${count}`)
     .join(', ');
+}
+
+// 批量导入入参的整单级校验（纯解析，不落库）：
+// users 数组形状与条数上限 → 文件内重复 username 去重（保留首次）→ 未注册账号的默认口令。
+// 行级问题（用户名不合法、DB 错误）不在此中断，由仓储逐行计入 failed[]、整单仍返回 200。
+// 返回 { entries, unregistered, password }；返回 { message } 即 400 ERR_INVALID_ARGUMENT。
+function parseImportPayload(body) {
+  const rows = body && body.users;
+  if (!Array.isArray(rows)) return { message: 'users 必须是数组。' };
+  if (rows.length === 0) return { message: 'users 不能为空。' };
+  if (rows.length > IMPORT_MAX_ROWS) {
+    return { message: `单次导入最多 ${IMPORT_MAX_ROWS} 行，当前 ${rows.length} 行，请拆分后重试。` };
+  }
+
+  const seen = new Set();
+  const entries = [];
+  for (const row of rows) {
+    const raw = row && typeof row === 'object' ? row.username : undefined;
+    const username = raw === undefined || raw === null ? '' : String(raw).trim();
+    if (seen.has(username)) continue;
+    seen.add(username);
+    const rawNickname = row && typeof row === 'object' ? row.nickname : undefined;
+    const nickname = rawNickname === undefined || rawNickname === null ? '' : String(rawNickname).trim();
+    // 请求体不接受角色字段：role 一律忽略，由仓储固定按 'user' 建号
+    entries.push({ username, nickname });
+  }
+
+  const password = body && body.default_password !== undefined && body.default_password !== null
+    ? String(body.default_password)
+    : '';
+  // 用户名不合法的行注定进 failed[]、不会建号，不计入"待注册"数量，
+  // 否则一行脏数据就能把整单拖成 400
+  const unregistered = entries.filter(e => USERNAME_PATTERN.test(e.username) && !usersRepo.findUserByUsername(e.username)).length;
+  if (unregistered > 0) {
+    if (!password) return { message: `其中 ${unregistered} 个账号尚未注册，请提供默认密码。` };
+    if (!isStrongPassword(password)) {
+      return { message: '默认密码至少 8 位，且须包含字母与数字或符号。' };
+    }
+  }
+  return { entries, unregistered, password };
 }
 
 // 全部组（管理台用）：仅管理员，含系统组 + 成员数 / 已绑定实体数
@@ -270,6 +317,38 @@ router.delete('/:id/members/:userId', requireAuth, requireRole('admin'), (req, r
     return failWithRepoError(res, err, NOT_FOUND);
   }
   res.json({ message: 'Member removed.' });
+});
+
+// 批量导入成员（Excel 已由前端解析为结构化行，后端只收 users 数组）
+// su-only：含自动注册建号，门槛与 POST /api/v1/users 一致（admin 调用 → 403）
+// 系统组（个人组 / 全体组）由触发器与回填维护成员关系，一律 403
+router.post('/:id/import', requireAuth, requireRole('su'), (req, res) => {
+  const target = findGroupParam(req.params.id);
+  if (!target) {
+    return sendNotFound(res, NOT_FOUND);
+  }
+  if (groupsRepo.isSystemGroup(target.row.kind)) {
+    return sendForbidden(res, '系统组不可导入成员。');
+  }
+  const parsed = parseImportPayload(req.body);
+  if (parsed.message) {
+    return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: parsed.message });
+  }
+  // 口令哈希一次算好复用给所有新建账号（与 routes/users.js 建号同款），
+  // 全部账号都已注册时根本不算哈希，也就不会把未使用的口令留在内存里
+  const passwordHash = parsed.unregistered > 0 ? bcrypt.hashSync(parsed.password, 10) : null;
+  let result;
+  try {
+    result = groupsRepo.importMembersIntoGroup({
+      groupId: target.id,
+      entries: parsed.entries,
+      passwordHash,
+      limit: IMPORT_MAX_ROWS
+    });
+  } catch (err) {
+    return failWithRepoError(res, err, NOT_FOUND);
+  }
+  res.json(result);
 });
 
 module.exports = router;
