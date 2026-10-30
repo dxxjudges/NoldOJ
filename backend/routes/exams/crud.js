@@ -122,7 +122,7 @@ router.get('/:id', optionalAuth, (req, res) => {
 // 创建试卷
 router.post('/', requireAuth, requireRole('teacher'), (req, res) => {
   const { title, description, time_limit, pass_score, max_attempts, show_answer, is_public, is_hidden, allow_ai_grading,
-    start_time, end_time, freeze_minutes, leaderboard_enabled, leaderboard_view_incomplete, questions } = req.body;
+    start_time, end_time, freeze_minutes, leaderboard_enabled, leaderboard_view_incomplete, stats_public, questions } = req.body;
 
   if (!title) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'title is required.' });
@@ -164,7 +164,8 @@ router.post('/', requireAuth, requireRole('teacher'), (req, res) => {
         is_hidden,
         allow_ai_grading,
         leaderboard_enabled,
-        leaderboard_view_incomplete
+        leaderboard_view_incomplete,
+        stats_public
       },
       start: st,
       end: et,
@@ -228,6 +229,7 @@ router.put('/:id', requireAuth, requireRole('teacher'), (req, res) => {
     freeze_minutes: has('freeze_minutes') ? clampInt(req.body.freeze_minutes, 0, 10080, 0) : (exam.freeze_minutes || 0),
     leaderboard_enabled: has('leaderboard_enabled') ? (req.body.leaderboard_enabled ? 1 : 0) : (exam.leaderboard_enabled || 1),
     leaderboard_view_incomplete: has('leaderboard_view_incomplete') ? (req.body.leaderboard_view_incomplete ? 1 : 0) : (exam.leaderboard_view_incomplete || 0),
+    stats_public: has('stats_public') ? (req.body.stats_public ? 1 : 0) : (exam.stats_public || 0),
     manual_frozen: newManualFrozen,
     manual_frozen_at: newFrozenAt,
     unfrozen: newUnfrozen

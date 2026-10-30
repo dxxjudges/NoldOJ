@@ -163,6 +163,7 @@ CREATE TABLE IF NOT EXISTS contests (
   freeze_minutes INTEGER DEFAULT 0,
   unfrozen INTEGER DEFAULT 0,
   unfrozen_at TEXT,
+  stats_public INTEGER DEFAULT 0, -- 统计公开开关：1=学生可查看聚合统计，0=仅教师可见
   is_hidden INTEGER DEFAULT 0,
   visibility TEXT NOT NULL DEFAULT 'public' CHECK(visibility IN ('public','groups')), -- public=全体可见 / groups=仅绑定组成员可见
   created_by INTEGER,
@@ -493,6 +494,7 @@ CREATE TABLE IF NOT EXISTS exams (
   freeze_minutes INTEGER DEFAULT 0, -- 结束前 N 分钟自动封榜，0=不自动封榜
   leaderboard_enabled INTEGER DEFAULT 1, -- 启用排行榜
   leaderboard_view_incomplete INTEGER DEFAULT 0, -- 未交卷用户能否查看排行榜，0=仅完成者
+  stats_public INTEGER DEFAULT 0,  -- 统计公开开关：1=学生可查看聚合统计，0=仅教师可见
   manual_frozen INTEGER DEFAULT 0, -- 手动封榜开关
   manual_frozen_at TEXT,           -- 手动封榜时刻（榜单快照锚点，UTC）
   unfrozen INTEGER DEFAULT 0,      -- 手动解榜开关（抑制自动封榜窗口）

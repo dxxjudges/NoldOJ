@@ -200,7 +200,7 @@ function updateExamWindow(id, v) {
   db.prepare(`
     UPDATE exams SET
       start_time = ?, end_time = ?, freeze_minutes = ?,
-      leaderboard_enabled = ?, leaderboard_view_incomplete = ?,
+      leaderboard_enabled = ?, leaderboard_view_incomplete = ?, stats_public = ?,
       manual_frozen = ?, manual_frozen_at = ?, unfrozen = ?,
       updated_at = datetime('now')
     WHERE id = ?
@@ -210,6 +210,7 @@ function updateExamWindow(id, v) {
     v.freeze_minutes,
     v.leaderboard_enabled,
     v.leaderboard_view_incomplete,
+    v.stats_public,
     v.manual_frozen,
     v.manual_frozen_at,
     v.unfrozen,
@@ -237,6 +238,33 @@ function getLeaderboardRows(examId, freezeAt) {
   return db.prepare(sql).all(...params);
 }
 
+// ── 统计 ──
+// 与排行榜同口径：仅学生（u.role='user'）进入统计；cutoff 为封榜时刻（SQLite UTC 文本），
+// 传入时只统计该时刻之前的交卷，避免封榜期间统计泄露最新成绩。
+function getExamStatsRows(examId, cutoff) {
+  let sql = `
+    SELECT es.id, es.user_id, es.total_score, es.max_score, es.status, es.submitted_at
+    FROM exam_submissions es JOIN users u ON u.id = es.user_id
+    WHERE es.exam_id = ? AND u.role = 'user'`;
+  const params = [examId];
+  if (cutoff) {
+    sql += ' AND es.submitted_at <= ?';
+    params.push(cutoff);
+  }
+  return db.prepare(sql).all(...params);
+}
+
+// 按提交 id 批量取答题记录（逐题均分/正确率用；空列表直接返回空数组）
+function listAnswersForSubmissions(submissionIds) {
+  if (!submissionIds || submissionIds.length === 0) return [];
+  const placeholders = submissionIds.map(() => '?').join(',');
+  return db.prepare(`
+    SELECT submission_id, question_id, score, max_score, is_correct, grading_status
+    FROM exam_answers
+    WHERE submission_id IN (${placeholders})
+  `).all(...submissionIds);
+}
+
 // ── 事务（1/4）：创建试卷 ──
 // 建卷全链路原子（试卷行 + 题目 + 内部编程题 + 总分）：事务替代原"失败补偿删除"——
 // 补偿自身失败会留下孤儿试卷。BEGIN→COMMIT 之间无 await，单连接不会被其他请求串入。
@@ -248,8 +276,8 @@ function createExamWithQuestions({ exam, start, end, freezeMinutes, creatorId, q
     db.exec('PRAGMA defer_foreign_keys = ON');
     const result = db.prepare(`
       INSERT INTO exams (title, description, time_limit, pass_score, max_attempts, show_answer, is_public, is_hidden, allow_ai_grading,
-        start_time, end_time, freeze_minutes, leaderboard_enabled, leaderboard_view_incomplete, creator_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        start_time, end_time, freeze_minutes, leaderboard_enabled, leaderboard_view_incomplete, stats_public, creator_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       sanitizeText(exam.title).trim(),
       sanitizeText(exam.description || ''),
@@ -265,6 +293,7 @@ function createExamWithQuestions({ exam, start, end, freezeMinutes, creatorId, q
       freezeMinutes,
       exam.leaderboard_enabled === false ? 0 : 1,
       exam.leaderboard_view_incomplete ? 1 : 0,
+      exam.stats_public ? 1 : 0,
       creatorId
     );
 
@@ -622,6 +651,8 @@ module.exports = {
   updateExamWindow,
   hasUserSubmission,
   getLeaderboardRows,
+  getExamStatsRows,
+  listAnswersForSubmissions,
   createExamWithQuestions,
   replaceExamQuestions,
   deleteExamCascade,

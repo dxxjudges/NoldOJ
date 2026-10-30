@@ -24,6 +24,8 @@
     document.getElementById('nav').innerHTML = renderNav('contests');
     const params = new URLSearchParams(window.location.search);
     const cid = params.get('id');
+    const me = getUser();
+    const isStaffUser = !!me && ['teacher', 'admin', 'su'].includes(me.role);
 
     async function loadContest() {
       if (!cid) { document.getElementById('content').innerHTML = '<p class="text-red-500">未指定比赛 ID</p>'; return; }
@@ -136,6 +138,7 @@
                 <p class="text-gray-500 dark:text-gray-400 dark:text-gray-500 mt-2">${escapeHtml(c.description || '暂无描述')}</p>
               </div>
               <span class="px-3 py-1 text-xs rounded-full font-medium ${statusColor}">${status}</span>
+              ${isStaffUser || c.stats_public === 1 ? `<a href="/pages/stats.html?type=contest&id=${c.id}" class="ml-3 px-3 py-1.5 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-sm rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/50 font-semibold">📊 统计</a>` : ''}
               ${virtualBtn}${myVirtualLink}
             </div>
             <div class="flex items-center space-x-6 text-sm text-gray-500 dark:text-gray-400 dark:text-gray-500 mb-4">

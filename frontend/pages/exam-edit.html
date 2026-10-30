@@ -87,9 +87,11 @@
           <div class="flex flex-col gap-2 justify-center">
             <label class="flex items-center gap-2"><input id="f-lben" type="checkbox" checked class="w-4 h-4 text-indigo-600 rounded"><span class="text-sm text-gray-700 dark:text-gray-300">启用排行榜</span></label>
             <label class="flex items-center gap-2"><input id="f-lbinc" type="checkbox" class="w-4 h-4 text-indigo-600 rounded"><span class="text-sm text-gray-700 dark:text-gray-300">允许未完成者查看</span></label>
+            <label class="flex items-center gap-2"><input id="f-stats" type="checkbox" class="w-4 h-4 text-indigo-600 rounded"><span class="text-sm text-gray-700 dark:text-gray-300">允许学生查看统计</span></label>
           </div>
         </div>
         <p class="text-xs text-gray-500 dark:text-gray-400 mt-3">开考前考生不可见且无法作答；结束后自动解榜并禁止交卷与代码提交。封榜期间排行榜只统计封榜时刻前的交卷，教师可在排行榜页手动封榜/解榜。</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">统计不受排行榜开关影响：教师始终可查看；勾选「允许学生查看统计」后，学生也能查看聚合统计（人数、分数分布、逐题均分/正确率，不含个人成绩）。</p>
       </div>
 
       <!-- 题目列表 -->
@@ -184,6 +186,7 @@
         document.getElementById('f-freeze').value = data.freeze_minutes || 0;
         document.getElementById('f-lben').checked = data.leaderboard_enabled !== 0;
         document.getElementById('f-lbinc').checked = data.leaderboard_view_incomplete === 1;
+        document.getElementById('f-stats').checked = data.stats_public === 1;
         // 可见性回填（仅 admin/su）；教师无权访问该接口，跳过
         if (canManageVisibility()) {
           await loadEntityVisibility('exams', editId, 'fVisibility', 'fVisibilityGroups');
@@ -659,6 +662,7 @@
         freeze_minutes: parseInt(document.getElementById('f-freeze').value) || 0,
         leaderboard_enabled: document.getElementById('f-lben').checked,
         leaderboard_view_incomplete: document.getElementById('f-lbinc').checked,
+        stats_public: document.getElementById('f-stats').checked,
         questions: questions.map((q, i) => {
           const item = {
             question_type: q.question_type,

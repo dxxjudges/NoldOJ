@@ -15,6 +15,26 @@ const { sendNotFound, sendForbidden } = require('../utils/apiErrors');
 
 const router = express.Router();
 
+// 比赛封榜状态：freeze_minutes>0 且已过冻结时刻且未手动解冻（结束后仍需手动解冻，与榜单行为一致）
+function resolveContestFreeze(contest, nowMs = Date.now()) {
+  const startMs = new Date(contest.start_time).getTime();
+  const endMs = new Date(contest.end_time).getTime();
+  const durMin = (endMs - startMs) / 60000;
+  if ((contest.freeze_minutes || 0) > 0 && !contest.unfrozen && contest.freeze_minutes < durMin) {
+    const freezeAt = new Date(endMs - contest.freeze_minutes * 60000);
+    if (nowMs >= freezeAt.getTime()) return { frozen: true, freezeAt };
+  }
+  return { frozen: false, freezeAt: null };
+}
+
+// 比赛时间字符串 → SQLite UTC 文本（与 submissions.created_at 同格式），供榜单/统计时间窗过滤
+function toSqliteUtc(d) {
+  if (!d) return null;
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return null;
+  return date.toISOString().replace('T', ' ').substring(0, 19);
+}
+
 // 实体可见性（用户组维度）：GET/PUT /:id/visibility
 router.use(makeVisibilityRouter({
   resourceType: 'contest',
@@ -84,7 +104,7 @@ router.get('/:id', optionalAuth, (req, res) => {
 });
 
 router.post('/', requireAuth, requireRole('teacher'), (req, res) => {
-  const { title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden } = req.body;
+  const { title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, stats_public } = req.body;
   if (!title || !start_time || !end_time) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'title, start_time, and end_time are required.' });
   }
@@ -95,7 +115,7 @@ router.post('/', requireAuth, requireRole('teacher'), (req, res) => {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'end_time must be after start_time.' });
   }
   const fm = Math.max(0, parseInt(freeze_minutes) || 0);
-  const result = contestsRepo.insert(title, description || '', start_time, end_time, is_virtual ? 1 : 0, fm, is_hidden ? 1 : 0, req.user.id);
+  const result = contestsRepo.insert(title, description || '', start_time, end_time, is_virtual ? 1 : 0, fm, is_hidden ? 1 : 0, req.user.id, stats_public ? 1 : 0);
   const contest = contestsRepo.get(result.lastInsertRowid);
   res.status(201).json(contest);
 });
@@ -105,7 +125,7 @@ router.put('/:id', requireAuth, requireRole('teacher'), (req, res) => {
   if (!contest) {
     return sendNotFound(res, 'Contest not found.');
   }
-  const { title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden } = req.body;
+  const { title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, stats_public } = req.body;
   const u = buildUpdates([
     { key: 'title', value: title },
     { key: 'description', value: description },
@@ -113,7 +133,8 @@ router.put('/:id', requireAuth, requireRole('teacher'), (req, res) => {
     { key: 'end_time', value: end_time },
     { key: 'is_virtual', value: is_virtual, transform: v => v ? 1 : 0 },
     { key: 'freeze_minutes', value: freeze_minutes, transform: v => Math.max(0, parseInt(v) || 0) },
-    { key: 'is_hidden', value: is_hidden, transform: v => v ? 1 : 0 }
+    { key: 'is_hidden', value: is_hidden, transform: v => v ? 1 : 0 },
+    { key: 'stats_public', value: stats_public, transform: v => v ? 1 : 0 }
   ]);
 
   if (u.count === 0) {
@@ -254,19 +275,7 @@ router.get('/:id/leaderboard', optionalAuth, (req, res) => {
   }
 
   // 判断冻结状态: freeze_minutes>0 且当前时间已过冻结时刻 且 未手动解冻
-  let frozen = false;
-  let freezeAt = null;
-  if (contest.freeze_minutes > 0 && !contest.unfrozen) {
-    const startMs = new Date(contest.start_time).getTime();
-    const endMs = new Date(contest.end_time).getTime();
-    const durMin = (endMs - startMs) / 60000;
-    if (contest.freeze_minutes < durMin) {
-      freezeAt = new Date(endMs - contest.freeze_minutes * 60000);
-      if (Date.now() >= freezeAt.getTime()) {
-        frozen = true;
-      }
-    }
-  }
+  const { frozen, freezeAt } = resolveContestFreeze(contest);
 
   // 仅参赛者可查看完整排行榜；教师/管理员/站长放行；非参赛者只返回冻结状态，不泄露排名
   const staff = !!req.user && isStaff(req.user.role);
@@ -283,13 +292,6 @@ router.get('/:id/leaderboard', optionalAuth, (req, res) => {
   if (contestProblems.length === 0) return res.json(frozenState);
 
   const problemIds = contestProblems.map(p => p.problem_id);
-
-  const toSqliteUtc = (d) => {
-    if (!d) return null;
-    const date = new Date(d);
-    if (isNaN(date.getTime())) return null;
-    return date.toISOString().replace('T', ' ').substring(0, 19);
-  };
 
   // 比赛时间窗口过滤：只统计比赛起止时间范围内的提交；冻结期间只统计到冻结时刻
   let timeFilter = '';
@@ -330,6 +332,108 @@ router.get('/:id/leaderboard', optionalAuth, (req, res) => {
   const leaderboard = buildStandings(entries, (a, b) => compareByScore(a, b, (x, y) => x.total_time - y.total_time));
 
   res.json(standingsPayload({ leaderboard, problem_ids: problemIds, frozen, freeze_at: freezeAtIso }));
+});
+
+// 比赛数据统计：教师始终可看；stats_public=1 时学生可看。
+// 与排行榜同口径：只统计参赛者、比赛时间窗内、封榜时截断到冻结时刻；仅输出聚合数据。
+router.get('/:id/stats', optionalAuth, (req, res) => {
+  const contest = contestsRepo.get(req.params.id);
+  if (!contest) {
+    return sendNotFound(res, 'Contest not found.');
+  }
+  const staff = !!req.user && isStaff(req.user.role);
+  // 隐藏比赛的统计仅 staff 可见（与排行榜一致）
+  if (contest.is_hidden && !staff) {
+    return sendNotFound(res, 'Contest not found.');
+  }
+  // 实体可见性（用户组）：组外用户不得查看统计
+  if (!canView(req, 'contest', contest.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('contest'));
+  }
+  // 统计开关：教师/管理员始终可看；学生仅在开关打开时可看
+  if (!staff && !contest.stats_public) {
+    return sendForbidden(res, '统计未公开，仅教师可见。');
+  }
+
+  const { frozen, freezeAt } = resolveContestFreeze(contest);
+  const freezeAtIso = freezeAt ? freezeAt.toISOString() : null;
+  // 非 staff 过滤隐藏题：统计页不下发学生看不到的题目标题
+  const problems = staff
+    ? contestsRepo.listStaffProblems(contest.id)
+    : contestsRepo.listProblems(contest.id, ' AND p.is_hidden = 0');
+  const problemIds = problems.map(p => p.id);
+
+  let submissions = [];
+  if (problemIds.length > 0) {
+    let timeFilter = '';
+    const params = [...problemIds];
+
+    const startUtc = toSqliteUtc(contest.start_time);
+    if (startUtc) {
+      timeFilter += ' AND s.created_at >= ?';
+      params.push(startUtc);
+    }
+    if (frozen && freezeAt) {
+      timeFilter += ' AND s.created_at <= ?';
+      params.push(toSqliteUtc(freezeAt));
+    } else if (contest.end_time) {
+      const endUtc = toSqliteUtc(contest.end_time);
+      if (endUtc) {
+        timeFilter += ' AND s.created_at <= ?';
+        params.push(endUtc);
+      }
+    }
+    // 仅统计已报名参赛的用户
+    timeFilter += ' AND s.user_id IN (SELECT user_id FROM contest_participants WHERE contest_id = ?)';
+    params.push(contest.id);
+
+    submissions = contestsRepo.getLeaderboardSubmissions(problemIds, timeFilter, params);
+  }
+
+  // 每题：尝试人数/提交数/AC 人数/通过率（按人数而非提交数，避免重复提交刷高分母）
+  const detail = problems.map(p => {
+    const rows = submissions.filter(s => s.problem_id === p.id);
+    const attempted = new Set(rows.map(r => r.user_id)).size;
+    const acceptedUsers = new Set(rows.filter(r => r.status === 'accepted').map(r => r.user_id)).size;
+    return {
+      problem_id: p.id,
+      alias: p.alias || '',
+      title: p.title,
+      attempts: rows.length,
+      users: attempted,
+      accepted_users: acceptedUsers,
+      accept_rate: attempted > 0 ? Math.round(acceptedUsers * 1000 / attempted) / 10 : 0
+    };
+  });
+
+  const userMap = buildUserProblemMap(submissions);
+  const activeUsers = Object.keys(userMap).length;
+  let solvedTotal = 0;
+  let solvedAll = 0;
+  for (const u of Object.values(userMap)) {
+    const solved = problemIds.filter(pid => u.problems[pid] && u.problems[pid].status === 'accepted').length;
+    solvedTotal += solved;
+    if (problemIds.length > 0 && solved === problemIds.length) solvedAll += 1;
+  }
+
+  res.json({
+    contest_id: contest.id,
+    title: contest.title,
+    start_time: contest.start_time || null,
+    end_time: contest.end_time || null,
+    stats_public: !!contest.stats_public,
+    frozen: !!frozen,
+    freeze_at: freezeAtIso,
+    summary: {
+      participant_count: contestsRepo.countParticipants(contest.id),
+      active_users: activeUsers,
+      submissions: submissions.length,
+      accepted_submissions: submissions.filter(s => s.status === 'accepted').length,
+      solved_all: solvedAll,
+      average_solved: activeUsers > 0 ? Math.round(solvedTotal * 10 / activeUsers) / 10 : 0
+    },
+    problems: detail
+  });
 });
 
 // 手动解冻排行榜 (admin)

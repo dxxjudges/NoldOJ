@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>数据统计 - NoldOJ</title>
+  <script src="/js/tailwind.js"></script>
+  <script>tailwind.config={darkMode:'class'}</script>
+  <script src="/js/api.js"></script>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
+  <div id="nav"></div>
+  <div class="max-w-5xl mx-auto px-4 py-8">
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">📊 数据统计</h1>
+      <a id="backLink" href="/pages/exams.html" class="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">← 返回</a>
+    </div>
+    <div id="msg" class="text-center py-12 text-gray-400 dark:text-gray-500">加载中...</div>
+    <div id="report" class="hidden space-y-6"></div>
+  </div>
+  <script>
+    // 试卷/比赛共用统计页：?type=exam|contest&id=xxx
+    // 后端已做权限判定（教师始终可看；学生需 stats_public=1），本页只负责渲染聚合数据。
+    const params = new URLSearchParams(window.location.search);
+    const type = params.get('type') === 'contest' ? 'contest' : 'exam';
+    const id = params.get('id');
+    const kindText = type === 'contest' ? '比赛' : '试卷';
+    document.getElementById('nav').innerHTML = renderNav(type === 'contest' ? 'contests' : 'exams');
+    document.getElementById('backLink').href = type === 'contest'
+      ? (id ? `/pages/contest.html?id=${encodeURIComponent(id)}` : '/pages/contests.html')
+      : (id ? `/pages/exam.html?id=${encodeURIComponent(id)}` : '/pages/exams.html');
+
+    function setMsg(html) {
+      document.getElementById('msg').innerHTML = html;
+      document.getElementById('msg').classList.remove('hidden');
+      document.getElementById('report').classList.add('hidden');
+    }
+
+    function badge(text, cls) {
+      return `<span class="px-2 py-0.5 text-xs rounded-full ${cls}">${escapeHtml(text)}</span>`;
+    }
+
+    function card(label, value, hint) {
+      return `
+        <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4">
+          <div class="text-xs text-gray-500 dark:text-gray-400">${escapeHtml(label)}</div>
+          <div class="mt-1 text-2xl font-bold text-gray-900 dark:text-white">${escapeHtml(String(value))}</div>
+          ${hint ? `<div class="text-xs text-gray-400 dark:text-gray-500 mt-1">${escapeHtml(hint)}</div>` : ''}
+        </div>
+      `;
+    }
+
+    function windowText(start, end) {
+      if (!start || !end) return '未设置时间窗';
+      return `${new Date(start).toLocaleString('zh-CN')} ~ ${new Date(end).toLocaleString('zh-CN')}`;
+    }
+
+    function headerCard(data) {
+      const freeze = data.frozen
+        ? badge(`🔒 已封榜${data.freeze_at ? '（' + new Date(data.freeze_at).toLocaleString('zh-CN') + ' 起）' : ''}`, 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300')
+        : '';
+      const pub = data.stats_public
+        ? badge('统计公开', 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300')
+        : badge('仅教师可见', 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300');
+      return `
+        <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6">
+          <div class="flex flex-wrap items-center gap-3">
+            <h2 class="text-xl font-bold text-gray-900 dark:text-white">${escapeHtml(data.title)}</h2>
+            ${pub}${freeze}
+          </div>
+          <div class="mt-2 text-sm text-gray-500 dark:text-gray-400">📅 ${escapeHtml(windowText(data.start_time, data.end_time))}</div>
+          ${data.frozen ? '<p class="mt-2 text-xs text-amber-600 dark:text-amber-400">封榜期间统计只计入封榜时刻前的数据，与排行榜口径一致。</p>' : ''}
+        </div>
+      `;
+    }
+
+    function renderExam(data) {
+      const s = data.summary || {};
+      const total = Math.max(...(data.distribution || []).map(d => d.count), 1);
+      const dist = (data.distribution || []).map(d => `
+        <div class="flex items-center gap-3 text-sm">
+          <span class="w-16 text-right text-gray-500 dark:text-gray-400 text-xs">${escapeHtml(d.label)}</span>
+          <div class="flex-1 bg-gray-100 dark:bg-gray-700 rounded-full h-2.5 overflow-hidden">
+            <div class="h-full bg-indigo-500 dark:bg-indigo-400 rounded-full" style="width:${Math.round(d.count * 100 / total)}%"></div>
+          </div>
+          <span class="w-10 text-gray-700 dark:text-gray-300 text-xs">${d.count} 人</span>
+        </div>
+      `).join('');
+
+      const typeName = t => t === 'choice' ? '选择' : t === 'true_false' ? '判断' : t === 'fill_blank' ? '填空' : t === 'program' ? '编程' : '大题';
+      const rows = (data.questions || []).map((q, i) => `
+        <tr class="border-b border-gray-50 dark:border-gray-700/50 last:border-0">
+          <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">${i + 1}</td>
+          <td class="px-4 py-3 text-sm text-gray-900 dark:text-white max-w-[320px] truncate" title="${escapeHtml(q.title)}">${escapeHtml(q.title)}</td>
+          <td class="px-4 py-3 text-center text-xs text-gray-500 dark:text-gray-400">${typeName(q.question_type)}</td>
+          <td class="px-4 py-3 text-center text-sm text-gray-700 dark:text-gray-300">${q.score}</td>
+          <td class="px-4 py-3 text-center text-sm text-gray-700 dark:text-gray-300">${q.answered}</td>
+          <td class="px-4 py-3 text-center text-sm font-semibold text-gray-900 dark:text-white">${q.average_score}</td>
+          <td class="px-4 py-3 text-center text-sm text-gray-700 dark:text-gray-300">${q.full_marks}</td>
+          <td class="px-4 py-3 text-center text-sm ${q.correct_rate >= 60 ? 'text-green-600 dark:text-green-400' : 'text-gray-700 dark:text-gray-300'}">${q.correct_rate}%</td>
+          <td class="px-4 py-3 text-center text-sm ${q.pending > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400'}">${q.pending}</td>
+        </tr>
+      `).join('');
+
+      document.getElementById('report').innerHTML = `
+        ${headerCard(data)}
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          ${card('参与人数', s.participants || 0, '有交卷记录的学生')}
+          ${card('交卷次数', s.submissions || 0, '含多次尝试')}
+          ${card('平均分', s.average || 0, `满分 ${data.total_score || 0}`)}
+          ${card('中位数', s.median || 0)}
+          ${card('最高分', s.highest || 0)}
+          ${card('最低分', s.lowest || 0)}
+          ${card('满分人数', s.full_score_count || 0)}
+          ${card(data.pass_score > 0 ? '及格率' : '及格人数', data.pass_score > 0 ? `${s.pass_rate || 0}%` : (s.pass_count || 0), data.pass_score > 0 ? `及格线 ${data.pass_score}` : '未设置及格线')}
+          ${card('已批改', s.graded || 0, `批改中 ${s.grading || 0} · 待处理 ${s.submitted || 0}`)}
+        </div>
+        <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6">
+          <h3 class="font-semibold text-gray-900 dark:text-white mb-4">分数分布（按满分百分比，每人取最佳一次）</h3>
+          <div class="space-y-2">${dist || '<p class="text-sm text-gray-400">暂无数据</p>'}</div>
+        </div>
+        <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 overflow-x-auto">
+          <div class="px-6 pt-6 pb-3">
+            <h3 class="font-semibold text-gray-900 dark:text-white">逐题统计</h3>
+            <p class="text-xs text-gray-400 mt-1">均分/正确率按参与统计的答卷计算；主观题「正确」以满分判定。</p>
+          </div>
+          ${rows ? `
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-xs text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700">
+                <th class="px-4 py-2 font-medium">#</th>
+                <th class="px-4 py-2 font-medium">题目</th>
+                <th class="px-4 py-2 font-medium text-center">题型</th>
+                <th class="px-4 py-2 font-medium text-center">分值</th>
+                <th class="px-4 py-2 font-medium text-center">作答</th>
+                <th class="px-4 py-2 font-medium text-center">均分</th>
+                <th class="px-4 py-2 font-medium text-center">满分</th>
+                <th class="px-4 py-2 font-medium text-center">正确率</th>
+                <th class="px-4 py-2 font-medium text-center">待批改</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          ` : '<p class="px-6 pb-6 text-sm text-gray-400">暂无题目</p>'}
+        </div>
+      `;
+      document.getElementById('msg').classList.add('hidden');
+      document.getElementById('report').classList.remove('hidden');
+    }
+
+    function renderContest(data) {
+      const s = data.summary || {};
+      const rows = (data.problems || []).map((p, i) => `
+        <tr class="border-b border-gray-50 dark:border-gray-700/50 last:border-0">
+          <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">${i + 1}</td>
+          <td class="px-4 py-3 text-sm text-gray-900 dark:text-white">
+            ${p.alias ? `<span class="text-xs text-gray-400 mr-2">${escapeHtml(p.alias)}</span>` : ''}${escapeHtml(p.title)}
+          </td>
+          <td class="px-4 py-3 text-center text-sm text-gray-700 dark:text-gray-300">${p.attempts}</td>
+          <td class="px-4 py-3 text-center text-sm text-gray-700 dark:text-gray-300">${p.users}</td>
+          <td class="px-4 py-3 text-center text-sm text-green-600 dark:text-green-400">${p.accepted_users}</td>
+          <td class="px-4 py-3">
+            <div class="flex items-center justify-center gap-2">
+              <div class="w-20 bg-gray-100 dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                <div class="h-full bg-emerald-500 dark:bg-emerald-400 rounded-full" style="width:${Math.min(100, p.accept_rate)}%"></div>
+              </div>
+              <span class="text-xs text-gray-600 dark:text-gray-300 w-12">${p.accept_rate}%</span>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+
+      document.getElementById('report').innerHTML = `
+        ${headerCard(data)}
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          ${card('参赛人数', s.participant_count || 0, '已报名人数')}
+          ${card('有提交人数', s.active_users || 0, '至少提交过一次')}
+          ${card('提交次数', s.submissions || 0, '已判定提交，同榜单口径')}
+          ${card('AC 提交数', s.accepted_submissions || 0)}
+          ${card('全部通过人数', s.solved_all || 0)}
+          ${card('人均通过题数', s.average_solved || 0)}
+        </div>
+        <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 overflow-x-auto">
+          <div class="px-6 pt-6 pb-3">
+            <h3 class="font-semibold text-gray-900 dark:text-white">逐题统计</h3>
+            <p class="text-xs text-gray-400 mt-1">通过率 = AC 人数 / 尝试人数（同一用户重复提交不重复计数）。</p>
+          </div>
+          ${rows ? `
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-xs text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700">
+                <th class="px-4 py-2 font-medium">#</th>
+                <th class="px-4 py-2 font-medium">题目</th>
+                <th class="px-4 py-2 font-medium text-center">提交数</th>
+                <th class="px-4 py-2 font-medium text-center">尝试人数</th>
+                <th class="px-4 py-2 font-medium text-center">AC 人数</th>
+                <th class="px-4 py-2 font-medium text-center">通过率</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          ` : '<p class="px-6 pb-6 text-sm text-gray-400">暂无题目</p>'}
+        </div>
+      `;
+      document.getElementById('msg').classList.add('hidden');
+      document.getElementById('report').classList.remove('hidden');
+    }
+
+    async function load() {
+      if (!id) { setMsg('<p class="text-red-500">未指定 ID</p>'); return; }
+      try {
+        const data = await apiCall('GET', type === 'contest' ? `/contests/${id}/stats` : `/exams/${id}/stats`);
+        if (type === 'contest') renderContest(data); else renderExam(data);
+      } catch (err) {
+        const status = err && err.status ? `（HTTP ${err.status}）` : '';
+        setMsg(`<div class="space-y-4">
+          <p class="text-red-500">${escapeHtml(err.message || '加载失败')}${status}</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400">${escapeHtml(kindText)}统计可能未对学生公开，请联系教师。</p>
+          <a id="errBack" href="#" class="text-indigo-600 dark:text-indigo-400 hover:underline">← 返回${escapeHtml(kindText)}</a>
+        </div>`);
+        const back = document.getElementById('errBack');
+        if (back) back.href = document.getElementById('backLink').href;
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>

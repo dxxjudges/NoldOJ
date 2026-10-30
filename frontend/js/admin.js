@@ -1248,14 +1248,19 @@ async function banUser(id) { try { await apiCall('POST', `/users/${id}/ban`); lo
                     ? '<span class="ml-1 px-1.5 py-0.5 text-xs rounded bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300">冻结中</span>'
                     : '<span class="ml-1 px-1.5 py-0.5 text-xs rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">冻结' + c.freeze_minutes + 'min</span>'))
             : '';
+          const statsBadge = c.stats_public
+            ? '<span class="ml-1 px-1.5 py-0.5 text-xs rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">统计公开</span>'
+            : '';
           return `
           <tr class="hover:bg-gray-50 dark:hover:bg-gray-700 dark:bg-gray-700">
             <td class="px-4 py-3 text-sm">${c.id}</td>
-            <td class="px-4 py-3 text-sm font-medium">${escapeHtml(c.title)}${freezeBadge}</td>
+            <td class="px-4 py-3 text-sm font-medium">${escapeHtml(c.title)}${freezeBadge}${statsBadge}</td>
             <td class="px-4 py-3 text-center text-sm">${c.problem_count || 0}</td>
             <td class="px-4 py-3 text-center text-sm">${new Date(c.start_time).toLocaleString()}</td>
             <td class="px-4 py-3 text-center text-sm">${new Date(c.end_time).toLocaleString()}</td>
             <td class="px-4 py-3 text-center">
+              <a href="/pages/stats.html?type=contest&id=${c.id}" class="text-emerald-600 dark:text-emerald-400 text-sm hover:underline mr-2">统计</a>
+              <button onclick="toggleContestStats(${c.id})" class="text-emerald-600 dark:text-emerald-400 text-sm hover:underline mr-2" title="切换学生是否可查看统计">${c.stats_public ? '关闭统计' : '公开统计'}</button>
               <button onclick="showContestProblemManager(${c.id})" class="text-green-600 dark:text-green-400 text-sm hover:underline mr-2">管理题目</button>
               <button onclick="startContestPlagiarismCheck(${c.id})" class="text-purple-600 dark:text-purple-400 text-sm hover:underline mr-2" title="一键全部查重">一键查重</button>
               ${isAdmin && c.freeze_minutes > 0 && !c.unfrozen ? `<button onclick="unfreezeContest(${c.id})" class="text-yellow-600 dark:text-yellow-400 text-sm hover:underline mr-2">解冻</button>` : ''}
@@ -1274,6 +1279,7 @@ async function banUser(id) { try { await apiCall('POST', `/users/${id}/ban`); lo
           start_time: localInputToIso(document.getElementById('cStart').value),
           end_time: localInputToIso(document.getElementById('cEnd').value),
           freeze_minutes: parseInt(document.getElementById('cFreeze').value) || 0,
+          stats_public: document.getElementById('cStats').checked,
         });
         hideCreateContest();
         loadContests();
@@ -1285,6 +1291,18 @@ async function banUser(id) { try { await apiCall('POST', `/users/${id}/ban`); lo
     async function deleteContest(id) {
       if (!confirm('确定删除此比赛？')) return;
       try { await apiCall('DELETE', `/contests/${id}`); loadContests(); } catch (err) { showToast(err.message, 'error'); }
+    }
+
+    // 统计开关：教师可随时切换，学生端据此显示统计入口
+    async function toggleContestStats(id) {
+      const contest = adminContestsCache.find(x => x.id === id);
+      if (!contest) return;
+      const next = !contest.stats_public;
+      try {
+        await apiCall('PUT', `/contests/${id}`, { stats_public: next });
+        showToast(next ? '已允许学生查看统计' : '已关闭学生统计查看', 'success');
+        loadContests();
+      } catch (err) { showToast(err.message, 'error'); }
     }
 
     async function unfreezeContest(id) {

@@ -122,6 +122,7 @@
             ${e.pass_score ? `<span>✅ 及格 ${e.pass_score} 分</span>` : ''}
             ${e.start_time && e.end_time ? `<span>📅 ${new Date(e.start_time).toLocaleString('zh-CN')} ~ ${new Date(e.end_time).toLocaleString('zh-CN')}</span>` : ''}
             ${e.leaderboard_enabled !== 0 ? `<a href="/pages/exam-leaderboard.html?id=${e.id}" class="ml-auto px-3 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition no-underline font-medium">🏆 排行榜</a>` : ''}
+            ${staffView || e.stats_public === 1 ? `<a href="/pages/stats.html?type=exam&id=${e.id}" class="${e.leaderboard_enabled !== 0 ? '' : 'ml-auto '}px-3 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition no-underline font-medium">📊 统计</a>` : ''}
           </div>
           ${locked ? '<div class="mt-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 rounded-xl text-sm">⛔ 考试已结束，无法再作答或交卷。</div>' : ''}
           ${e.time_limit ? '<div id="timer" class="mt-4 text-lg font-mono font-bold text-indigo-600 dark:text-indigo-400"></div>' : ''}
@@ -452,6 +453,11 @@
           ${currentExam.leaderboard_enabled !== 0 ? `
           <div class="mt-4">
             <a href="/pages/exam-leaderboard.html?id=${currentExam.id}" class="text-indigo-600 dark:text-indigo-400 hover:underline">🏆 查看排行榜 →</a>
+          </div>
+          ` : ''}
+          ${currentExam.stats_public === 1 || (getUser() && ['teacher','admin','su'].includes(getUser().role)) ? `
+          <div class="mt-4">
+            <a href="/pages/stats.html?type=exam&id=${currentExam.id}" class="text-emerald-600 dark:text-emerald-400 hover:underline">📊 查看数据统计 →</a>
           </div>
           ` : ''}
         </div>

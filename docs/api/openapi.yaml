@@ -3168,6 +3168,9 @@ paths:
                   format: date-time
                 is_virtual:
                   type: integer
+                stats_public:
+                  type: integer
+                  description: 1=学生可查看统计（教师始终可看），默认 0
       responses:
         '201':
           description: 创建成功
@@ -3365,6 +3368,23 @@ paths:
       responses:
         '200':
           description: 排行榜
+
+  /contests/{id}/stats:
+    get:
+      tags: [比赛]
+      summary: 比赛数据统计（教师始终可看；stats_public=1 时学生可看）
+      description: 可选认证。与排行榜同口径（仅参赛者、比赛时间窗内、封榜截断）；仅返回聚合数据（参赛/提交/AC 人数、全通过人数、人均通过题数、逐题尝试人数与通过率）。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 统计数据
+        '403':
+          description: 统计未公开（学生且 stats_public=0）或用户组不可见
 
   /contests/{id}/unfreeze:
     post:
@@ -3567,6 +3587,9 @@ paths:
                 leaderboard_view_incomplete:
                   type: integer
                   description: 1 允许未完成者查看排行榜
+                stats_public:
+                  type: integer
+                  description: 1=学生可查看统计（教师始终可看），默认 0
                 questions:
                   type: array
                   items:
@@ -3745,6 +3768,23 @@ paths:
           description: 排行榜（含 my 本人名次）
         '403':
           description: 完成考试后可查看排行榜
+
+  /exams/{id}/stats:
+    get:
+      tags: [试卷]
+      summary: 试卷数据统计（教师始终可看；stats_public=1 时学生可看）
+      description: 可选认证。门禁与排行榜一致（隐藏/私有/用户组不可见均拒绝），封榜期只统计冻结时刻前的交卷；每人取最佳一次尝试，仅返回聚合数据（人数、评分状态、分数分布、逐题均分/正确率），不含个人成绩明细。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 统计数据
+        '403':
+          description: 统计未公开（学生且 stats_public=0）或不可见
 
   /exams/{id}/visibility:
     get:

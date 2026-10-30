@@ -472,6 +472,10 @@
           <input id="cStart" type="datetime-local" aria-label="比赛开始时间" class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-800 dark:text-white">
           <input id="cEnd" type="datetime-local" aria-label="比赛结束时间" class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-800 dark:text-white">
           <input id="cFreeze" type="number" min="0" aria-label="冻结时长（分钟，0=不冻结）" placeholder="冻结时长(分钟，0=不冻结)" class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-800 dark:text-white">
+          <label class="flex items-center gap-2 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl text-sm text-gray-700 dark:text-gray-300">
+            <input id="cStats" type="checkbox" class="w-4 h-4 text-indigo-600 rounded">
+            <span>允许学生查看统计（教师始终可看）</span>
+          </label>
         </div>
         <div id="cVisibilityBox" class="hidden mb-4">
           <label class="text-xs text-gray-500 dark:text-gray-400 mb-1 block">可见性（仅管理员/超级管理员可设置）</label>

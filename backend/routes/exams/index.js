@@ -6,6 +6,7 @@ const { makeVisibilityRouter } = require('../_visibility');
 
 const crud = require('./crud');
 const leaderboard = require('./leaderboard');
+const stats = require('./stats');
 const submissions = require('./submissions');
 const grading = require('./grading');
 
@@ -22,6 +23,7 @@ router.use(makeVisibilityRouter({
 // 各分组内部路由注册顺序与原文件一致；分组间不存在同 method+path 的路由，挂载顺序不影响匹配
 router.use(crud);
 router.use(leaderboard);
+router.use(stats);
 router.use(submissions);
 router.use(grading);
 

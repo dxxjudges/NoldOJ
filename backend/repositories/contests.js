@@ -49,9 +49,9 @@ function countParticipants(contestId) {
   return db.prepare('SELECT COUNT(*) as c FROM contest_participants WHERE contest_id = ?').get(contestId).c;
 }
 
-function insert(title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, created_by) {
-  return db.prepare('INSERT INTO contests (title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-    title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, created_by
+function insert(title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, created_by, stats_public = 0) {
+  return db.prepare('INSERT INTO contests (title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, stats_public, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, stats_public ? 1 : 0, created_by
   );
 }
 

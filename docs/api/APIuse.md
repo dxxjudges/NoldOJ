@@ -633,7 +633,11 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 
 ### POST /contests — 创建比赛
 
+需教师及以上。必填 `title`、`start_time`、`end_time`；可选 `description`、`is_virtual`、`freeze_minutes`（结束前 N 分钟封榜）、`is_hidden`、`stats_public`（1=学生可查看统计，默认 0）。
+
 ### PUT /contests/:id — 更新比赛
+
+需教师及以上。字段同创建（只更新传入的字段），其中 `stats_public` 可单独传以切换统计公开状态。
 
 ### DELETE /contests/:id — 删除比赛
 
@@ -660,6 +664,10 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 - **参赛者 / teacher / admin / su**：返回完整排行榜（`leaderboard` 含 `rank`、`total_score`、`total_time`、各题得分）
 - **非参赛者 / 未登录**：仅返回冻结状态，`leaderboard` 为空数组，不泄露排名
 - 排行榜冻结时只统计冻结时刻之前的提交
+
+### GET /contests/:id/stats — 比赛数据统计
+
+可选认证。教师/管理员始终可看；`stats_public=1` 时学生也可看（否则 403「统计未公开，仅教师可见。」）。与排行榜同口径：仅统计参赛者、比赛时间窗内的已判定提交，封榜时截断到冻结时刻；非 staff 不返回隐藏题。仅输出聚合数据（参赛人数、有提交人数、提交/AC 数、全通过人数、人均通过题数，以及逐题提交数/尝试人数/AC 人数/通过率），不含个人成绩明细。
 
 ### POST /contests/:id/unfreeze — 解除排行榜冻结
 
@@ -1008,7 +1016,7 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 
 ### POST /exams — 创建试卷
 
-需教师及以上。必填 `title`；可选 `description`、`time_limit`、`pass_score`、`max_attempts`、`show_answer`、`is_public`、`is_hidden`、`allow_ai_grading`、`questions`（题目数组），以及时间窗/排行榜：`start_time`、`end_time`（ISO8601，须同时设置或同时留空，结束须晚于开考）、`freeze_minutes`（结束前 N 分钟自动封榜，0 关闭）、`leaderboard_enabled`、`leaderboard_view_incomplete`。
+需教师及以上。必填 `title`；可选 `description`、`time_limit`、`pass_score`、`max_attempts`、`show_answer`、`is_public`、`is_hidden`、`allow_ai_grading`、`questions`（题目数组），以及时间窗/排行榜：`start_time`、`end_time`（ISO8601，须同时设置或同时留空，结束须晚于开考）、`freeze_minutes`（结束前 N 分钟自动封榜，0 关闭）、`leaderboard_enabled`、`leaderboard_view_incomplete`、`stats_public`（1=学生可查看统计，默认 0）。
 
 ### GET /exams/:id — 试卷详情
 
@@ -1016,7 +1024,7 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 
 ### PUT /exams/:id — 编辑试卷
 
-需教师及以上。字段同创建；另支持封榜控制：`manual_frozen`（`true` 封榜、`false` 解封）、`unfrozen`（`true` 恢复自动封榜，与 `manual_frozen:false` 搭配使用）。
+需教师及以上。字段同创建；另支持封榜控制：`manual_frozen`（`true` 封榜、`false` 解封）、`unfrozen`（`true` 恢复自动封榜，与 `manual_frozen:false` 搭配使用）、`stats_public`（切换学生能否查看统计）。
 
 ### DELETE /exams/:id — 删除试卷
 
@@ -1045,6 +1053,10 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 ### GET /exams/:id/leaderboard — 试卷排行榜
 
 门禁顺序：试卷 404 → 隐藏 403 → `leaderboard_enabled=0` 返回 404 → 未完成 403（`leaderboard_view_incomplete=1` 时放开）。`?limit=` 默认 100、上限 200。每人最佳一次尝试、总分降序、同分先交卷者靠前，仅 `role=user` 入榜；封榜期只计冻结时刻前的提交；返回 `my`（本人名次）。
+
+### GET /exams/:id/stats — 试卷数据统计
+
+可选认证。教师/管理员始终可看；`stats_public=1` 时学生也可看（否则 403「统计未公开，仅教师可见。」）。门禁与排行榜一致：隐藏/私有试卷、用户组不可见均拒绝；封榜期只统计冻结时刻前的交卷。聚合返回参与人数、交卷次数、评分状态分布、平均/中位/最高/最低分、满分与及格人数、按满分百分比 11 档的分数分布，以及逐题作答人数/均分/满分人数/正确率/待批改数；每人取最佳一次尝试，不含个人成绩明细。
 
 ## 11.6 系统状态 `/system`
 
@@ -1174,6 +1186,7 @@ fi
 | 在线编程 | `/pages/ide.html` | IDE（需登录，三阶段状态，内存检测） |
 | 比赛 | `/pages/contests.html` | 比赛列表 |
 | 比赛详情 | `/pages/contest.html?id=X` | 题目列表、排行榜 |
+| 数据统计 | `/pages/stats.html?type=exam&id=X` | 试卷/比赛聚合统计（教师始终可见，学生需开关打开） |
 | 文章 | `/pages/articles.html` | 文章列表 |
 | 文章详情 | `/pages/article.html?id=X` | Markdown 文章 |
 | 文章编辑 | `/pages/article-edit.html` | 发布/编辑文章 |
