@@ -21,11 +21,11 @@
 ### 2.1 获取代码
 
 ```batch
-git clone https://gitee.com/dxx114514/NoldOJ.git
+git clone https://github.com/dxxjudges/NoldOJ.git
 cd NoldOJ
 ```
 
-GitHub 镜像：https://github.com/dxxjudges/NoldOJ
+Gitee 镜像：https://gitee.com/dxx114514/NoldOJ
 
 ### 2.2 编译判题沙箱
 

@@ -19,15 +19,15 @@
 
 ## 获取代码
 
-主仓库托管在 Gitee：
+主仓库托管在 Github：
 
 ```batch
-git clone https://gitee.com/dxx114514/NoldOJ.git
+git clone https://github.com/dxxjudges/NoldOJ.git
 cd NoldOJ\backend
 npm ci
 ```
 
-GitHub 镜像：https://github.com/dxxjudges/NoldOJ
+Gitee 镜像：https://gitee.com/dxx114514/NoldOJ
 
 > `start.bat` 首次启动时若检测到依赖缺失会自动执行 `npm install`，手动开发环境建议直接用 `npm ci` 锁定版本。
 
