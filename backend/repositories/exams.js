@@ -34,7 +34,10 @@ function listExams({ isStaff, search, limit, offset, visibilityFilter }) {
   const exams = db.prepare(`
     SELECT e.*, u.username as creator_name,
       (SELECT COUNT(*) FROM exam_questions WHERE exam_id = e.id) as question_count,
-      (SELECT COUNT(*) FROM exam_submissions WHERE exam_id = e.id) as submission_count
+      (CASE WHEN e.is_survey = 1
+        THEN (SELECT COUNT(*) FROM exam_survey_submissions WHERE exam_id = e.id)
+        ELSE (SELECT COUNT(*) FROM exam_submissions WHERE exam_id = e.id)
+      END) as submission_count
     FROM exams e LEFT JOIN users u ON e.creator_id = u.id
     ${where}
     ORDER BY e.id DESC LIMIT ? OFFSET ?
@@ -179,6 +182,8 @@ function updateExamBase(id, v) {
       is_public = COALESCE(?, is_public),
       is_hidden = COALESCE(?, is_hidden),
       allow_ai_grading = COALESCE(?, allow_ai_grading),
+      is_survey = COALESCE(?, is_survey),
+      is_anonymous = COALESCE(?, is_anonymous),
       updated_at = datetime('now')
     WHERE id = ?
   `).run(
@@ -191,6 +196,8 @@ function updateExamBase(id, v) {
     v.is_public,
     v.is_hidden,
     v.allow_ai_grading,
+    v.is_survey,
+    v.is_anonymous,
     id
   );
 }
@@ -265,6 +272,54 @@ function listAnswersForSubmissions(submissionIds) {
   `).all(...submissionIds);
 }
 
+// ── 问卷 ──
+// 问卷不判分：不写 exam_submissions / exam_answers，只做「标记已提交 + 匿名作答」。
+// marker（exam_survey_submissions）带 user_id，但仅用于交卷去重与人数统计，
+// 任何统计接口都不下发 user_id；answers（exam_survey_answers）完全匿名存储。
+function hasSurveySubmission(examId, userId) {
+  return db.prepare('SELECT 1 as x FROM exam_survey_submissions WHERE exam_id = ? AND user_id = ? LIMIT 1').get(examId, userId);
+}
+
+function getSurveySubmission(examId, userId) {
+  return db.prepare('SELECT * FROM exam_survey_submissions WHERE exam_id = ? AND user_id = ?').get(examId, userId);
+}
+
+// 问卷交卷事务：标记已提交 + 匿名作答一并落库（重复提交由调用方先拦，INSERT OR IGNORE 幂等兜底）
+function createSurveySubmission({ examId, userId, rows }) {
+  db.exec('BEGIN');
+  try {
+    db.prepare('INSERT OR IGNORE INTO exam_survey_submissions (exam_id, user_id) VALUES (?, ?)').run(examId, userId);
+    const answerStmt = db.prepare('INSERT INTO exam_survey_answers (exam_id, question_id, answer) VALUES (?, ?, ?)');
+    for (const r of rows) {
+      answerStmt.run(examId, r.question_id, r.answer || '');
+    }
+    db.exec('COMMIT');
+    return getSurveySubmission(examId, userId);
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch { /* 回滚失败不掩盖原始错误（外层已 rethrow） */ }
+    throw e;
+  }
+}
+
+function countSurveySubmissions(examId) {
+  return db.prepare('SELECT COUNT(*) as c FROM exam_survey_submissions WHERE exam_id = ?').get(examId).c;
+}
+
+// 问卷逐题作答（匿名行，仅 question_id + answer；统计聚合用）
+function listSurveyAnswers(examId) {
+  return db.prepare('SELECT question_id, answer FROM exam_survey_answers WHERE exam_id = ?').all(examId);
+}
+
+// 非匿名问卷的提交名单（教师端查看谁已提交；匿名问卷路由层一律拒绝调用）
+function listSurveyParticipants(examId, limit, offset) {
+  return db.prepare(`
+    SELECT ss.user_id, ss.submitted_at, u.username, u.nickname
+    FROM exam_survey_submissions ss JOIN users u ON u.id = ss.user_id
+    WHERE ss.exam_id = ?
+    ORDER BY ss.submitted_at ASC LIMIT ? OFFSET ?
+  `).all(examId, limit, offset);
+}
+
 // ── 事务（1/4）：创建试卷 ──
 // 建卷全链路原子（试卷行 + 题目 + 内部编程题 + 总分）：事务替代原"失败补偿删除"——
 // 补偿自身失败会留下孤儿试卷。BEGIN→COMMIT 之间无 await，单连接不会被其他请求串入。
@@ -276,8 +331,8 @@ function createExamWithQuestions({ exam, start, end, freezeMinutes, creatorId, q
     db.exec('PRAGMA defer_foreign_keys = ON');
     const result = db.prepare(`
       INSERT INTO exams (title, description, time_limit, pass_score, max_attempts, show_answer, is_public, is_hidden, allow_ai_grading,
-        start_time, end_time, freeze_minutes, leaderboard_enabled, leaderboard_view_incomplete, stats_public, creator_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        start_time, end_time, freeze_minutes, leaderboard_enabled, leaderboard_view_incomplete, stats_public, is_survey, is_anonymous, creator_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       sanitizeText(exam.title).trim(),
       sanitizeText(exam.description || ''),
@@ -291,9 +346,13 @@ function createExamWithQuestions({ exam, start, end, freezeMinutes, creatorId, q
       start,
       end,
       freezeMinutes,
-      exam.leaderboard_enabled === false ? 0 : 1,
+      // 问卷强制无排行榜（路由层也会归零，此处兜底）
+      (exam.is_survey ? false : exam.leaderboard_enabled !== false) ? 1 : 0,
       exam.leaderboard_view_incomplete ? 1 : 0,
       exam.stats_public ? 1 : 0,
+      exam.is_survey ? 1 : 0,
+      // 匿名仅在问卷模式下生效
+      (exam.is_survey && exam.is_anonymous) ? 1 : 0,
       creatorId
     );
 
@@ -653,6 +712,12 @@ module.exports = {
   getLeaderboardRows,
   getExamStatsRows,
   listAnswersForSubmissions,
+  hasSurveySubmission,
+  getSurveySubmission,
+  createSurveySubmission,
+  countSurveySubmissions,
+  listSurveyAnswers,
+  listSurveyParticipants,
   createExamWithQuestions,
   replaceExamQuestions,
   deleteExamCascade,

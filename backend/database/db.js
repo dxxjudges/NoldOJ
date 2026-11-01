@@ -263,6 +263,9 @@ async function initDB() {
   if (!exCols.includes('manual_frozen_at')) sqlDb.exec('ALTER TABLE exams ADD COLUMN manual_frozen_at TEXT');
   if (!exCols.includes('unfrozen')) sqlDb.exec("ALTER TABLE exams ADD COLUMN unfrozen INTEGER DEFAULT 0");
   if (!exCols.includes('stats_public')) sqlDb.exec("ALTER TABLE exams ADD COLUMN stats_public INTEGER DEFAULT 0");
+  // 问卷/匿名问卷：语义见 repositories/exams.js 的 createSurveySubmission 与 stats 路由
+  if (!exCols.includes('is_survey')) sqlDb.exec("ALTER TABLE exams ADD COLUMN is_survey INTEGER DEFAULT 0");
+  if (!exCols.includes('is_anonymous')) sqlDb.exec("ALTER TABLE exams ADD COLUMN is_anonymous INTEGER DEFAULT 0");
 
   const ideCols = tableCols('ide_runs');
   if (!ideCols.includes('status')) sqlDb.exec("ALTER TABLE ide_runs ADD COLUMN status TEXT DEFAULT 'pending'");

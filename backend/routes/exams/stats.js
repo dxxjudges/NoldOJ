@@ -57,6 +57,60 @@ router.get('/:id/stats', optionalAuth, (req, res) => {
     return sendForbidden(res, '统计未公开，仅教师可见。');
   }
 
+  // ── 问卷分支：无分数可统计，只出参与人数与逐题作答分布（作答行完全匿名，无个人维度）──
+  if (exam.is_survey) {
+    const questions = repo.listExamQuestionsForDetail(exam.id, false);
+    const surveyAnswers = repo.listSurveyAnswers(exam.id);
+    const surveyQuestions = questions.map(q => {
+      const qa = surveyAnswers.filter(a => a.question_id === q.id);
+      const item = {
+        question_id: q.id,
+        title: q.title,
+        question_type: q.question_type,
+        answered: qa.length,
+        distribution: []
+      };
+      if (q.question_type === 'choice') {
+        // 选择题：按选项字母聚合计数（选项内容下发，前端渲染分布）
+        let options;
+        try { options = JSON.parse(q.options || '[]'); } catch { options = []; }
+        if (!Array.isArray(options)) options = [];
+        item.options = options;
+        item.distribution = options.map((opt, i) => ({
+          label: `${String.fromCharCode(65 + i)}. ${opt}`,
+          count: qa.filter(a => a.answer === String.fromCharCode(65 + i)).length
+        }));
+        // 落在选项字母范围之外的作答（异常值）单独计数，不计入任何选项
+        const maxLetter = String.fromCharCode(64 + options.length);
+        item.invalid = qa.filter(a => {
+          const s = a.answer || '';
+          return s.length !== 1 || s < 'A' || s > maxLetter;
+        }).length;
+      } else if (q.question_type === 'true_false') {
+        item.distribution = [
+          { label: '正确', count: qa.filter(a => a.answer === 'true').length },
+          { label: '错误', count: qa.filter(a => a.answer === 'false').length }
+        ];
+      }
+      // 填空/大题不聚合选项分布，也不下发原文（匿名保护），只给作答人数
+      return item;
+    });
+
+    return res.json({
+      exam_id: exam.id,
+      title: exam.title,
+      is_survey: true,
+      is_anonymous: !!exam.is_anonymous,
+      start_time: exam.start_time || null,
+      end_time: exam.end_time || null,
+      stats_public: !!exam.stats_public,
+      summary: {
+        participants: repo.countSurveySubmissions(exam.id)
+      },
+      questions: surveyQuestions
+    });
+  }
+
   const fz = resolveFreeze(exam);
   const cutoff = fz.frozen && fz.freeze_at ? toSqliteUtc(fz.freeze_at) : null;
   const rows = repo.getExamStatsRows(exam.id, cutoff);
@@ -110,6 +164,8 @@ router.get('/:id/stats', optionalAuth, (req, res) => {
     title: exam.title,
     total_score: exam.total_score,
     pass_score: exam.pass_score,
+    is_survey: !!exam.is_survey,
+    is_anonymous: !!exam.is_anonymous,
     start_time: exam.start_time || null,
     end_time: exam.end_time || null,
     stats_public: !!exam.stats_public,

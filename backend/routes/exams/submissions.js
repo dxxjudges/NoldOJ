@@ -38,6 +38,46 @@ router.post('/:id/submit', requireAuth, (req, res) => {
     return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: winMsg });
   }
 
+  // ── 问卷分支：不判分、禁用排行榜，流程=提交 → 标记已提交 → 计入统计 ──
+  // 不写 exam_submissions / exam_answers（无个人提交记录）；匿名作答只存 question_id + answer。
+  if (exam.is_survey) {
+    // 问卷仅一次提交：以标记表为准（max_attempts 对问卷无意义）
+    if (repo.hasSurveySubmission(exam.id, req.user.id)) {
+      return res.status(400).json({ code: 1, reason: 'ERR_ALREADY_SUBMITTED', message: '您已提交过本问卷。' });
+    }
+    const { answers } = req.body;
+    if (!Array.isArray(answers)) {
+      return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'answers is required.' });
+    }
+    const questions = repo.listExamQuestionsRaw(exam.id);
+    const questionMap = {};
+    questions.forEach(q => { questionMap[q.id] = q; });
+    const seen = new Set();
+    const rows = [];
+    for (const a of answers) {
+      if (!a || seen.has(a.question_id)) continue;
+      seen.add(a.question_id);
+      const q = questionMap[a.question_id];
+      if (!q) continue;
+      rows.push({ question_id: q.id, answer: a.answer || '' });
+    }
+    if (rows.length === 0) {
+      return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'answers is required.' });
+    }
+    try {
+      const marker = repo.createSurveySubmission({ examId: exam.id, userId: req.user.id, rows });
+      return res.status(201).json({
+        survey: true,
+        anonymous: !!exam.is_anonymous,
+        // 匿名问卷不回传提交时刻，与详情接口口径一致
+        submitted_at: exam.is_anonymous ? null : marker.submitted_at
+      });
+    } catch (e) {
+      logError('EXAM', 'survey submit failed:', e && e.message);
+      return res.status(500).json({ code: 1, reason: 'ERR_INTERNAL', message: 'Submit failed.' });
+    }
+  }
+
   // 检查尝试次数；当前尝试号 = 已提交次数 + 1（程序题代码按此号归属）
   const attemptCount = repo.countUserSubmissions(exam.id, req.user.id);
   if (exam.max_attempts > 0 && attemptCount >= exam.max_attempts) {
@@ -229,6 +269,14 @@ router.get('/:id/submission/:sid', requireAuth, (req, res) => {
 router.get('/:id/submissions', requireAuth, requireRole('teacher'), (req, res) => {
   const { page = 1, limit = 50 } = req.query;
   const { page: pageNum, limit: limitNum, offset } = parsePageLimit(page, limit, 50, 100);
+
+  // 问卷：无判分提交记录。非匿名返回「谁已提交」名单；匿名一律不下发个人身份（只回计数）
+  const exam = repo.getExam(req.params.id);
+  if (exam && exam.is_survey) {
+    const total = repo.countSurveySubmissions(exam.id);
+    const submissions = exam.is_anonymous ? [] : repo.listSurveyParticipants(exam.id, limitNum, offset);
+    return res.json({ total, page: pageNum, limit: limitNum, survey: true, anonymous: !!exam.is_anonymous, submissions });
+  }
 
   const total = repo.countSubmissionsByExam(req.params.id);
 

@@ -87,6 +87,12 @@
         currentExam = e;
         document.title = `${e.title} - NoldOJ`;
 
+        // 问卷：提交过 → 展示完成页（无分数、无排行榜）
+        if (e.is_survey === 1 && e.survey_submitted) {
+          showSurveyDone(e);
+          return;
+        }
+
         // 如果已提交（已批改或待批改），显示结果状态
         if (e.user_submission && (e.user_submission.status === 'graded' || e.user_submission.status === 'grading')) {
           showResult(e.user_submission);
@@ -111,18 +117,23 @@
         if (!isNaN(s) && !isNaN(en)) winState = Date.now() < s ? 'not_started' : (Date.now() > en ? 'ended' : 'running');
       }
       const locked = winState === 'ended' && !staffView;
+      const survey = e.is_survey === 1;
       let html = `
         <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm dark:shadow-gray-900/30 border border-gray-100 dark:border-gray-700 p-6 mb-6">
-          <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">${escapeHtml(e.title)}</h1>
+          <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">${escapeHtml(e.title)}
+            ${survey ? '<span class="align-middle ml-2 px-2 py-0.5 text-xs rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300">📋 问卷</span>' : ''}
+            ${survey && e.is_anonymous === 1 ? '<span class="align-middle ml-1 px-2 py-0.5 text-xs rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300">🕵️ 匿名</span>' : ''}
+          </h1>
           <div class="text-gray-500 dark:text-gray-400 prose dark:prose-invert max-w-none prose-sm">${renderMarkdown(e.description || '')}</div>
+          ${survey ? `<div class="mt-3 px-3 py-2 rounded-xl text-sm ${e.is_anonymous === 1 ? 'bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300' : 'bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300'}">${e.is_anonymous === 1 ? '🕵️ 本问卷为匿名问卷：不记录个人提交内容，提交后无法撤销。' : '📋 本问卷不判分，每人仅可提交一次，提交后计入统计。'}</div>` : ''}
           <div class="flex flex-wrap items-center gap-4 mt-4 text-sm text-gray-500 dark:text-gray-400">
             <span>📊 ${questions.length} 题</span>
-            <span>💯 总分 ${e.total_score}</span>
+            ${survey ? '<span>📝 不判分</span>' : `<span>💯 总分 ${e.total_score}</span>`}
             ${e.time_limit ? `<span>⏱️ ${e.time_limit} 分钟</span>` : ''}
-            ${e.pass_score ? `<span>✅ 及格 ${e.pass_score} 分</span>` : ''}
+            ${!survey && e.pass_score ? `<span>✅ 及格 ${e.pass_score} 分</span>` : ''}
             ${e.start_time && e.end_time ? `<span>📅 ${new Date(e.start_time).toLocaleString('zh-CN')} ~ ${new Date(e.end_time).toLocaleString('zh-CN')}</span>` : ''}
-            ${e.leaderboard_enabled !== 0 ? `<a href="/pages/exam-leaderboard.html?id=${e.id}" class="ml-auto px-3 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition no-underline font-medium">🏆 排行榜</a>` : ''}
-            ${staffView || e.stats_public === 1 ? `<a href="/pages/stats.html?type=exam&id=${e.id}" class="${e.leaderboard_enabled !== 0 ? '' : 'ml-auto '}px-3 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition no-underline font-medium">📊 统计</a>` : ''}
+            ${!survey && e.leaderboard_enabled !== 0 ? `<a href="/pages/exam-leaderboard.html?id=${e.id}" class="ml-auto px-3 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition no-underline font-medium">🏆 排行榜</a>` : ''}
+            ${staffView || e.stats_public === 1 ? `<a href="/pages/stats.html?type=exam&id=${e.id}" class="${!survey && e.leaderboard_enabled !== 0 ? '' : 'ml-auto '}px-3 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition no-underline font-medium">📊 统计</a>` : ''}
           </div>
           ${locked ? '<div class="mt-3 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 rounded-xl text-sm">⛔ 考试已结束，无法再作答或交卷。</div>' : ''}
           ${e.time_limit ? '<div id="timer" class="mt-4 text-lg font-mono font-bold text-indigo-600 dark:text-indigo-400"></div>' : ''}
@@ -139,8 +150,8 @@
                 <div class="font-medium text-gray-900 dark:text-white prose dark:prose-invert max-w-none prose-sm">${renderMarkdown(q.title)}</div>
                 <div class="text-xs text-gray-400 mt-1">
                   ${q.question_type === 'choice' ? '选择题' : q.question_type === 'true_false' ? '判断题' : q.question_type === 'fill_blank' ? '填空题' : q.question_type === 'program' ? '💻 编程题' : '大题'}
-                  · ${q.score} 分
-                  ${q.question_type !== 'program' ? (q.is_subjective ? '· 主观题' : '· 客观题') : ''}
+                  ${survey ? '' : `· ${q.score} 分`}
+                  ${!survey && q.question_type !== 'program' ? (q.is_subjective ? '· 主观题' : '· 客观题') : ''}
                 </div>
               </div>
             </div>
@@ -225,7 +236,7 @@
       html += `
         <div class="mt-6 flex justify-end">
           <button onclick="submitExam()" ${locked ? 'disabled style="opacity:.5;cursor:not-allowed"' : ''} class="px-8 py-3 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700 transition">
-            提交试卷
+            ${survey ? '提交问卷' : '提交试卷'}
           </button>
         </div>
       `;
@@ -379,6 +390,8 @@
       const user = getUser();
       if (!user) { window.location.href = '/pages/login.html'; return; }
 
+      const survey = currentExam && currentExam.is_survey === 1;
+
       const answerArray = Object.entries(answers).map(([question_id, answer]) => ({
         question_id: parseInt(question_id),
         answer
@@ -389,7 +402,9 @@
         return !pg.my_submission && !programSubmitted[q.id];
       });
 
-      if (answerArray.length === 0 && missingProg.length === 0) {
+      if (survey) {
+        if (!confirm('确认提交问卷？提交后不可修改。')) return;
+      } else if (answerArray.length === 0 && missingProg.length === 0) {
         if (!confirm('你还没有作答，确定要提交吗？')) return;
       } else if (missingProg.length > 0) {
         if (!confirm(`还有 ${missingProg.length} 道编程题尚未提交代码，确定交卷吗？`)) return;
@@ -397,6 +412,11 @@
 
       try {
         const result = await apiCall('POST', `/exams/${eid}/submit`, { answers: answerArray });
+        if (result.survey) {
+          showToast('提交成功！感谢参与。', 'success');
+          setTimeout(() => { window.location.reload(); }, 900);
+          return;
+        }
         let tail = '';
         if (result.has_pending_program) tail = '\n⏳ 编程题评测中，稍后刷新查看成绩';
         else if (result.has_subjective) tail = '\n含有主观题，等待批改...';
@@ -460,6 +480,32 @@
             <a href="/pages/stats.html?type=exam&id=${currentExam.id}" class="text-emerald-600 dark:text-emerald-400 hover:underline">📊 查看数据统计 →</a>
           </div>
           ` : ''}
+        </div>
+      `;
+    }
+
+    // 问卷提交完成页：不展示分数/答案/排行榜；匿名问卷不显示提交时刻（与后端口径一致）
+    function showSurveyDone(e) {
+      const me = getUser();
+      const staffView = !!me && ['teacher', 'admin', 'su'].includes(me.role);
+      const anonymous = e.is_anonymous === 1;
+      document.getElementById('content').innerHTML = `
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm dark:shadow-gray-900/30 border border-gray-100 dark:border-gray-700 p-6 mb-6">
+          <h1 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">${escapeHtml(e.title)}
+            <span class="align-middle ml-2 px-2 py-0.5 text-xs rounded-full bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300">📋 问卷</span>
+            ${anonymous ? '<span class="align-middle ml-1 px-2 py-0.5 text-xs rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300">🕵️ 匿名</span>' : ''}
+          </h1>
+          <div class="mt-2 text-gray-500 dark:text-gray-400 prose dark:prose-invert max-w-none prose-sm">${renderMarkdown(e.description || '')}</div>
+          <div class="mt-6 flex flex-col items-center py-6">
+            <div class="text-5xl">✅</div>
+            <p class="mt-3 text-lg font-semibold text-gray-900 dark:text-white">已提交，感谢参与！</p>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">${anonymous ? '本问卷为匿名问卷，不会记录你的个人提交内容。' : '本问卷不判分，你的提交已计入统计。'}</p>
+            ${!anonymous && e.survey_submitted_at ? `<p class="mt-2 text-xs text-gray-400">提交时间：${new Date(e.survey_submitted_at).toLocaleString('zh-CN')}</p>` : ''}
+          </div>
+          <div class="mt-2 flex flex-wrap gap-4">
+            ${staffView || e.stats_public === 1 ? `<a href="/pages/stats.html?type=exam&id=${e.id}" class="text-emerald-600 dark:text-emerald-400 hover:underline">📊 查看数据统计 →</a>` : ''}
+            <a href="/pages/exams.html" class="text-indigo-600 dark:text-indigo-400 hover:underline">← 返回试卷库</a>
+          </div>
         </div>
       `;
     }

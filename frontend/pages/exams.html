@@ -47,13 +47,17 @@
                 <h3 class="text-lg font-bold text-gray-900 dark:text-white">${escapeHtml(e.title)}</h3>
                 <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">${escapeHtml(e.description || '暂无描述')}</p>
               </div>
-              <span class="px-3 py-1 text-xs rounded-full ${e.is_public ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}">${e.is_public ? '公开' : '私有'}</span>
+              <div class="flex items-center gap-2">
+                ${e.is_survey ? `<span class="px-3 py-1 text-xs rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">📋 问卷</span>` : ''}
+                ${e.is_survey && e.is_anonymous ? `<span class="px-3 py-1 text-xs rounded-full bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-300">🕵️ 匿名</span>` : ''}
+                <span class="px-3 py-1 text-xs rounded-full ${e.is_public ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'}">${e.is_public ? '公开' : '私有'}</span>
+              </div>
             </div>
             <div class="flex items-center gap-4 mt-3 text-xs text-gray-400 dark:text-gray-500">
               <span>📊 ${e.question_count || 0} 题</span>
-              <span>📝 ${e.submission_count || 0} 次提交</span>
+              <span>📝 ${e.submission_count || 0}${e.is_survey ? ' 人已提交' : ' 次提交'}</span>
               <span>⏱️ ${e.time_limit ? e.time_limit + ' 分钟' : '不限时'}</span>
-              <span>💯 总分 ${e.total_score || 0}</span>
+              ${e.is_survey ? '<span>📝 不判分</span>' : `<span>💯 总分 ${e.total_score || 0}</span>`}
               <span>👤 ${escapeHtml(e.creator_name || '')}</span>
               <span>${new Date(e.created_at).toLocaleDateString('zh-CN')}</span>
             </div>

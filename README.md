@@ -285,7 +285,7 @@ npm run lint        :: ESLint 静态检查
 npm run test:server :: 黑盒安全/登录测试（需服务已启动，见下）
 ```
 
-- `npm test` 覆盖计分脚本解释器、输出比较、限流、查重、考试/比赛、Excel 导入、沙箱真实编译、初始管理员口令策略共 11 个文件。
+- `npm test` 覆盖计分脚本解释器、输出比较、限流、查重、考试/比赛、问卷、Excel 导入、沙箱真实编译、初始管理员口令策略共 17 个文件、282 项用例。
 - 需要数据库的测试自动使用 `%TEMP%\NoldOJ-test\` 下的独立库，**不读写生产库** `backend/data/NoldOJ.db`，测试中断也不会留下脏数据。
 - `sandbox.test.js` 会真实调用 g++ 编译 C++，未安装 MinGW 的环境自动跳过这 3 个用例。
 - 三处 Excel 导入均提供站内示例文件（含列说明与可照抄的示例行，放在 `frontend/pages/` 由静态服务以根路径提供）：
@@ -454,7 +454,7 @@ NoldOJ/
 │   ├── routes/             # API 路由（37 个文件，23 个挂载前缀，181 个端点）
 │   ├── services/           # 评测引擎 + IDE 评测 + AI 安全审查 + 验证码 + 查重
 │   ├── sandbox/            # 代码执行沙箱 + 计分脚本解释器
-│   ├── test/               # 测试（16 个文件：`npm test` 单测 110 项 + 黑盒 `test:server` security 24 项 + reset-login 6 项断言）
+│   ├── test/               # 测试（17 个文件：`npm test` 单测 282 项 + 黑盒 `test:server` security 24 项 + reset-login 6 项断言）
 │   └── src/                # 服务器入口
 ├── frontend/
 │   ├── css/                # 全局样式（含暗色模式覆盖）
@@ -476,6 +476,15 @@ NoldOJ/
 | **超级管理员** | 最高权限 | 所有权限 + 修改角色、重置密码、免密登录、管理语言、设置 Rating、自删除、设置图床限额 |
 
 ## 更新日志
+
+### 新增：试卷「问卷」模式（可匿名）
+- **问卷开关**：试卷新增 `is_survey`；开启后**不判分、禁用排行榜**（创建/更新/仓库层三重兜底把 `leaderboard_enabled` 归零，`GET /exams/:id/leaderboard` 直接 404），学生端隐藏分数/及格分与排行榜入口，改显示「📋 问卷」「🕵️ 匿名」徽标与不判分提示
+- **匿名开关**：`is_anonymous` 仅在问卷模式下生效（非问卷传 true 会被归零）；开启后不记录个人提交：教师提交列表只回参与人数、名单为空，详情与交卷响应均不返回提交时刻
+- **提交语义**：问卷交卷不写 `exam_submissions`/`exam_answers`，改为写 `exam_survey_submissions`（`exam_id,user_id` 去重标记，用于「已提交」判定与计数）与 `exam_survey_answers`（仅 `exam_id,question_id,answer`，无个人维度）；每人仅可提交一次，重复提交 400 `ERR_ALREADY_SUBMITTED`；问卷不支持编程题（创建/更新均 400）
+- **统计**：`GET /exams/:id/stats` 对问卷走独立分支——参与人数 + 逐题作答分布（选择题按选项计数、判断题按正确/错误计数、填空/大题只给作答人数，不下发原文），不含任何个人身份
+- **数据库**：`exams` 新增 `is_survey`、`is_anonymous`（默认 0），新增 `exam_survey_submissions`、`exam_survey_answers` 两表，旧库启动时渐进迁移
+- **页面**：试卷编辑页新增问卷/匿名开关（联动禁用排行榜选项、保存前拦截编程题），试卷列表与答题页展示问卷/匿名状态，`stats.html` 新增问卷统计视图
+- **测试与文档**：新增 `test/exam-survey.test.js` 8 项（覆盖创建与匿名归零、编程题拦截、交卷不落个人记录、重复提交、匿名详情与名单、统计分布、排行榜 404、普通试卷不受影响）；`npm test` 282 项通过
 
 ### 新增：试卷/比赛数据统计
 - **统计接口**：新增 `GET /exams/:id/stats`、`GET /contests/:id/stats`；教师/管理员始终可看，实体 `stats_public=1` 时学生也可看

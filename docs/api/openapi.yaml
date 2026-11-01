@@ -3590,6 +3590,12 @@ paths:
                 stats_public:
                   type: integer
                   description: 1=学生可查看统计（教师始终可看），默认 0
+                is_survey:
+                  type: integer
+                  description: 1=问卷模式（不判分、禁用排行榜、不支持编程题），默认 0
+                is_anonymous:
+                  type: integer
+                  description: 1=匿名问卷（不记录个人提交，教师也看不到名单）；仅在 is_survey=1 时生效，否则落库为 0
                 questions:
                   type: array
                   items:
@@ -3638,6 +3644,12 @@ paths:
                 unfrozen:
                   type: integer
                   description: 1 恢复自动封榜（与 manual_frozen=0 搭配）
+                is_survey:
+                  type: integer
+                  description: 1=问卷模式；关闭时连带把 is_anonymous 归零
+                is_anonymous:
+                  type: integer
+                  description: 1=匿名问卷；仅在 is_survey=1 时生效
       responses:
         '200':
           description: 更新成功
@@ -3659,6 +3671,7 @@ paths:
     post:
       tags: [试卷]
       summary: 交卷（须在时间窗内）
+      description: 普通试卷交卷会判分；问卷（is_survey=1）不判分、不写个人提交记录，只记录「已提交」标记与匿名作答，每人仅一次（重复提交 400 ERR_ALREADY_SUBMITTED），成功返回 201 `{ survey, anonymous, submitted_at }`，匿名时 submitted_at 为 null。
       security:
         - bearerAuth: []
       parameters:
@@ -3667,9 +3680,24 @@ paths:
           required: true
           schema:
             type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                answers:
+                  type: array
+                  description: 作答数组 [{ question_id, answer }]
+                  items:
+                    type: object
       responses:
         '200':
-          description: 交卷成功
+          description: 交卷成功（普通试卷）
+        '201':
+          description: 问卷提交成功
+        '400':
+          description: 参数错误或问卷重复提交（ERR_ALREADY_SUBMITTED）
         '403':
           description: 不在考试时间窗内
   /exams/{id}/submission/{sid}:
@@ -3696,6 +3724,7 @@ paths:
     get:
       tags: [试卷]
       summary: 试卷提交列表（教师）
+      description: "问卷返回 `{ total, page, limit, survey: true, anonymous, submissions }`；total 为已提交人数，非匿名问卷 submissions 为已提交用户名单，匿名问卷恒为空数组。"
       security:
         - bearerAuth: []
       parameters:
@@ -3751,6 +3780,7 @@ paths:
     get:
       tags: [试卷]
       summary: 试卷排行榜（完成门槛/封榜快照）
+      description: 问卷（is_survey=1）或 leaderboard_enabled=0 时返回 404。
       parameters:
         - name: id
           in: path
@@ -3773,7 +3803,7 @@ paths:
     get:
       tags: [试卷]
       summary: 试卷数据统计（教师始终可看；stats_public=1 时学生可看）
-      description: 可选认证。门禁与排行榜一致（隐藏/私有/用户组不可见均拒绝），封榜期只统计冻结时刻前的交卷；每人取最佳一次尝试，仅返回聚合数据（人数、评分状态、分数分布、逐题均分/正确率），不含个人成绩明细。
+      description: "可选认证。门禁与排行榜一致（隐藏/私有/用户组不可见均拒绝），封榜期只统计冻结时刻前的交卷；每人取最佳一次尝试，仅返回聚合数据（人数、评分状态、分数分布、逐题均分/正确率），不含个人成绩明细。问卷返回独立结构 `{ is_survey: true, is_anonymous, summary: { participants }, questions: [...] }`：participants 为已提交人数，每题给 answered 与 distribution（选择题按选项、判断题按正确/错误计数），填空/大题只给作答人数、不下发原文。"
       parameters:
         - name: id
           in: path

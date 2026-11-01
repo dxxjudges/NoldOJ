@@ -28,7 +28,8 @@ router.get('/:id/leaderboard', optionalAuth, (req, res) => {
   if (!canView(req, 'exam', exam.id)) {
     return sendForbidden(res, visibilityDeniedMessage('exam'));
   }
-  if (!exam.leaderboard_enabled) {
+  if (!exam.leaderboard_enabled || exam.is_survey) {
+    // 问卷模式不提供排行榜（无分数可排名）；开关层在创建/更新时也会强制归零
     return sendNotFound(res, 'Leaderboard not found.');
   }
   // 完成门槛：有交卷记录=已完成；未完成者（含匿名）仅在教师放开时可看

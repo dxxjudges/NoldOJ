@@ -495,6 +495,8 @@ CREATE TABLE IF NOT EXISTS exams (
   leaderboard_enabled INTEGER DEFAULT 1, -- 启用排行榜
   leaderboard_view_incomplete INTEGER DEFAULT 0, -- 未交卷用户能否查看排行榜，0=仅完成者
   stats_public INTEGER DEFAULT 0,  -- 统计公开开关：1=学生可查看聚合统计，0=仅教师可见
+  is_survey INTEGER DEFAULT 0,     -- 问卷模式：1=不判分、禁用排行榜，提交只计入统计
+  is_anonymous INTEGER DEFAULT 0,  -- 匿名问卷：1=不记录个人提交（仅保留去重标记），仅在 is_survey=1 时生效
   manual_frozen INTEGER DEFAULT 0, -- 手动封榜开关
   manual_frozen_at TEXT,           -- 手动封榜时刻（榜单快照锚点，UTC）
   unfrozen INTEGER DEFAULT 0,      -- 手动解榜开关（抑制自动封榜窗口）
@@ -576,6 +578,31 @@ CREATE TABLE IF NOT EXISTS exam_attempts (
   FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+-- 问卷提交标记（交卷去重 + 参与人数统计）
+-- 问卷不判分，因此不写入 exam_submissions / exam_answers；此表只记录「该用户已提交」，
+-- 任何接口都不返回 user_id（匿名问卷尤其如此），仅在教师按人查看非匿名问卷时经接口显式放行。
+CREATE TABLE IF NOT EXISTS exam_survey_submissions (
+  exam_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  submitted_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (exam_id, user_id),
+  FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- 问卷作答（匿名存储：不关联用户/提交，仅用于聚合统计）
+-- 匿名问卷与非匿名问卷都写入本表；答案离开用户维度后无法反查个人，统计只做聚合展示。
+CREATE TABLE IF NOT EXISTS exam_survey_answers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  exam_id INTEGER NOT NULL,
+  question_id INTEGER NOT NULL,
+  answer TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE,
+  FOREIGN KEY (question_id) REFERENCES exam_questions(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_exam_survey_answers_exam ON exam_survey_answers(exam_id, question_id);
 
 -- ═══════════════════════════════════════════════════════
 -- 用户组与实体可见性

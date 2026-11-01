@@ -88,10 +88,13 @@
             <label class="flex items-center gap-2"><input id="f-lben" type="checkbox" checked class="w-4 h-4 text-indigo-600 rounded"><span class="text-sm text-gray-700 dark:text-gray-300">启用排行榜</span></label>
             <label class="flex items-center gap-2"><input id="f-lbinc" type="checkbox" class="w-4 h-4 text-indigo-600 rounded"><span class="text-sm text-gray-700 dark:text-gray-300">允许未完成者查看</span></label>
             <label class="flex items-center gap-2"><input id="f-stats" type="checkbox" class="w-4 h-4 text-indigo-600 rounded"><span class="text-sm text-gray-700 dark:text-gray-300">允许学生查看统计</span></label>
+            <label class="flex items-center gap-2"><input id="f-survey" type="checkbox" class="w-4 h-4 text-indigo-600 rounded" onchange="syncSurveyUI()"><span class="text-sm text-gray-700 dark:text-gray-300">问卷模式（不判分、无排行榜）</span></label>
+            <label class="flex items-center gap-2" id="f-anon-box"><input id="f-anon" type="checkbox" class="w-4 h-4 text-indigo-600 rounded" disabled><span class="text-sm text-gray-400">匿名（不记录个人提交）</span></label>
           </div>
         </div>
         <p class="text-xs text-gray-500 dark:text-gray-400 mt-3">开考前考生不可见且无法作答；结束后自动解榜并禁止交卷与代码提交。封榜期间排行榜只统计封榜时刻前的交卷，教师可在排行榜页手动封榜/解榜。</p>
         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">统计不受排行榜开关影响：教师始终可查看；勾选「允许学生查看统计」后，学生也能查看聚合统计（人数、分数分布、逐题均分/正确率，不含个人成绩）。</p>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1" id="surveyHint" hidden>问卷模式：交卷不判分、排行榜禁用，每人仅可提交一次，提交后只计入统计（作答内容匿名存储，不与用户关联）。匿名选项仅在问卷模式下可用——开启后教师也看不到提交名单，只统计作答人数与分布。问卷不支持编程题。</p>
       </div>
 
       <!-- 题目列表 -->
@@ -150,6 +153,25 @@
       const ms = Date.parse(v);
       return isNaN(ms) ? null : new Date(ms).toISOString();
     }
+
+    // 问卷开关联动：匿名仅问卷可用；问卷强制无排行榜（保存时服务端也会归零）
+    function syncSurveyUI() {
+      const survey = document.getElementById('f-survey').checked;
+      const anon = document.getElementById('f-anon');
+      const anonBox = document.getElementById('f-anon-box');
+      const hint = document.getElementById('surveyHint');
+      anon.disabled = !survey;
+      anonBox.classList.toggle('opacity-50', !survey);
+      if (!survey) anon.checked = false;
+      hint.hidden = !survey;
+      // 问卷无排行榜：禁用并取消排行榜相关选项
+      document.getElementById('f-lben').disabled = survey;
+      document.getElementById('f-lbinc').disabled = survey;
+      if (survey) {
+        document.getElementById('f-lben').checked = false;
+        document.getElementById('f-lbinc').checked = false;
+      }
+    }
     let langList = [
       { name: 'c', display_name: 'C' },
       { name: 'cpp', display_name: 'C++' },
@@ -187,6 +209,9 @@
         document.getElementById('f-lben').checked = data.leaderboard_enabled !== 0;
         document.getElementById('f-lbinc').checked = data.leaderboard_view_incomplete === 1;
         document.getElementById('f-stats').checked = data.stats_public === 1;
+        document.getElementById('f-survey').checked = data.is_survey === 1;
+        document.getElementById('f-anon').checked = data.is_anonymous === 1;
+        syncSurveyUI();
         // 可见性回填（仅 admin/su）；教师无权访问该接口，跳过
         if (canManageVisibility()) {
           await loadEntityVisibility('exams', editId, 'fVisibility', 'fVisibilityGroups');
@@ -628,6 +653,14 @@
 
       if (questions.length === 0) { showToast('请至少添加一道题目', 'error'); return; }
 
+      const isSurvey = document.getElementById('f-survey').checked;
+
+      // 问卷不判分，编程题无法纳入：保存前拦截并提示
+      if (isSurvey && questions.some(q => q.question_type === 'program')) {
+        showToast('问卷模式不支持编程题，请先移除编程题或关闭问卷模式', 'error');
+        return;
+      }
+
       for (let vi = 0; vi < questions.length; vi++) {
         const q = questions[vi];
         if (q.question_type !== 'program') continue;
@@ -660,9 +693,11 @@
         start_time: localInputToIso(document.getElementById('f-start').value),
         end_time: localInputToIso(document.getElementById('f-end').value),
         freeze_minutes: parseInt(document.getElementById('f-freeze').value) || 0,
-        leaderboard_enabled: document.getElementById('f-lben').checked,
+        leaderboard_enabled: !isSurvey && document.getElementById('f-lben').checked,
         leaderboard_view_incomplete: document.getElementById('f-lbinc').checked,
         stats_public: document.getElementById('f-stats').checked,
+        is_survey: isSurvey,
+        is_anonymous: isSurvey && document.getElementById('f-anon').checked,
         questions: questions.map((q, i) => {
           const item = {
             question_type: q.question_type,

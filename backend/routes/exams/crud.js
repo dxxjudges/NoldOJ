@@ -65,12 +65,21 @@ router.get('/:id', optionalAuth, (req, res) => {
   let userSubmission = null;
   let currentAttempt = 1;
   let attemptStartedAt = null;
+  // 问卷：只关心「是否已提交」（去重标记）；匿名问卷不下发提交时刻，避免任何可关联个人的信息
+  let surveySubmitted = false;
+  let surveySubmittedAt = null;
   if (req.user) {
+    if (exam.is_survey) {
+      const marker = repo.getSurveySubmission(exam.id, req.user.id);
+      surveySubmitted = !!marker;
+      // 匿名问卷：仅返回布尔值；非匿名问卷可见自己的提交时刻
+      surveySubmittedAt = marker && !exam.is_anonymous ? marker.submitted_at : null;
+    }
     const attemptCount = repo.countUserSubmissions(exam.id, req.user.id);
     currentAttempt = attemptCount + 1;
     userSubmission = repo.getLastUserSubmission(exam.id, req.user.id);
-    // 首次进入即起算作答时限（刷新不重置）；教师/管理员不计时
-    if (exam.time_limit > 0 && !isStaffUser) {
+    // 首次进入即起算作答时限（刷新不重置）；教师/管理员不计时；问卷已提交后不再起算
+    if (exam.time_limit > 0 && !isStaffUser && !surveySubmitted) {
       attemptStartedAt = startAttempt(exam.id, req.user.id, currentAttempt);
     }
   }
@@ -111,6 +120,8 @@ router.get('/:id', optionalAuth, (req, res) => {
     ...exam,
     questions,
     user_submission: userSubmission,
+    survey_submitted: surveySubmitted,
+    survey_submitted_at: surveySubmittedAt,
     current_attempt: currentAttempt,
     // 服务端计时锚点：前端用 (server_now - attempt_started_at) 计算剩余时间，
     // 避免依赖客户端时钟，也使刷新页面无法重置倒计时
@@ -122,10 +133,17 @@ router.get('/:id', optionalAuth, (req, res) => {
 // 创建试卷
 router.post('/', requireAuth, requireRole('teacher'), (req, res) => {
   const { title, description, time_limit, pass_score, max_attempts, show_answer, is_public, is_hidden, allow_ai_grading,
-    start_time, end_time, freeze_minutes, leaderboard_enabled, leaderboard_view_incomplete, stats_public, questions } = req.body;
+    start_time, end_time, freeze_minutes, leaderboard_enabled, leaderboard_view_incomplete, stats_public, is_survey, is_anonymous, questions } = req.body;
 
   if (!title) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'title is required.' });
+  }
+
+  // 问卷模式：不判分、禁用排行榜；匿名仅在问卷模式下生效（路由归一，repo 再兜底）
+  const survey = !!is_survey;
+  const anonymous = survey && !!is_anonymous;
+  if (survey && Array.isArray(questions) && questions.some(q => q && q.question_type === 'program')) {
+    return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '问卷模式不支持编程题（不判分）。' });
   }
 
   // 时间窗校验（须同时设置或同时留空）
@@ -163,9 +181,12 @@ router.post('/', requireAuth, requireRole('teacher'), (req, res) => {
         is_public,
         is_hidden,
         allow_ai_grading,
-        leaderboard_enabled,
+        // 问卷强制无排行榜
+        leaderboard_enabled: survey ? false : leaderboard_enabled,
         leaderboard_view_incomplete,
-        stats_public
+        stats_public,
+        is_survey: survey,
+        is_anonymous: anonymous
       },
       start: st,
       end: et,
@@ -191,6 +212,14 @@ router.put('/:id', requireAuth, requireRole('teacher'), (req, res) => {
   const { title, description, time_limit, pass_score, max_attempts, show_answer, is_public, is_hidden, allow_ai_grading, questions } = req.body;
   const has = (k) => Object.prototype.hasOwnProperty.call(req.body, k);
 
+  // 问卷开关生效值：匿名仅在问卷模式下生效；问卷强制无排行榜（下方 updateExamWindow 归零）
+  const effSurvey = has('is_survey') ? !!req.body.is_survey : !!exam.is_survey;
+  const effAnonymous = effSurvey && (has('is_anonymous') ? !!req.body.is_anonymous : !!exam.is_anonymous);
+  // 问卷不判分，编程题无法纳入：开启问卷时禁止携带编程题（先校验再动库，避免半次更新）
+  if (effSurvey && Array.isArray(questions) && questions.some(q => q && q.question_type === 'program')) {
+    return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '问卷模式不支持编程题（不判分）。' });
+  }
+
   // 时间窗：先算出生效值并校验，失败不动库（未提供则沿用原值）
   let effStart = exam.start_time;
   let effEnd = exam.end_time;
@@ -211,7 +240,10 @@ router.put('/:id', requireAuth, requireRole('teacher'), (req, res) => {
     show_answer: show_answer !== undefined ? (show_answer ? 1 : 0) : null,
     is_public: is_public !== undefined ? (is_public ? 1 : 0) : null,
     is_hidden: is_hidden !== undefined ? (is_hidden ? 1 : 0) : null,
-    allow_ai_grading: allow_ai_grading !== undefined ? (allow_ai_grading ? 1 : 0) : null
+    allow_ai_grading: allow_ai_grading !== undefined ? (allow_ai_grading ? 1 : 0) : null,
+    // 问卷开关按生效值整写（含「关问卷连带清匿名」），不依赖 has() 判空
+    is_survey: effSurvey ? 1 : 0,
+    is_anonymous: effAnonymous ? 1 : 0
   });
 
   // 时间窗 / 排行榜设置 / 手动封解榜状态机：
@@ -227,7 +259,8 @@ router.put('/:id', requireAuth, requireRole('teacher'), (req, res) => {
     start_time: effStart,
     end_time: effEnd,
     freeze_minutes: has('freeze_minutes') ? clampInt(req.body.freeze_minutes, 0, 10080, 0) : (exam.freeze_minutes || 0),
-    leaderboard_enabled: has('leaderboard_enabled') ? (req.body.leaderboard_enabled ? 1 : 0) : (exam.leaderboard_enabled || 1),
+    // 问卷强制无排行榜；非问卷时开关按传入/原值
+    leaderboard_enabled: effSurvey ? 0 : (has('leaderboard_enabled') ? (req.body.leaderboard_enabled ? 1 : 0) : (exam.leaderboard_enabled || 1)),
     leaderboard_view_incomplete: has('leaderboard_view_incomplete') ? (req.body.leaderboard_view_incomplete ? 1 : 0) : (exam.leaderboard_view_incomplete || 0),
     stats_public: has('stats_public') ? (req.body.stats_public ? 1 : 0) : (exam.stats_public || 0),
     manual_frozen: newManualFrozen,

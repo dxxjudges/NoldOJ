@@ -1016,15 +1016,17 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 
 ### POST /exams — 创建试卷
 
-需教师及以上。必填 `title`；可选 `description`、`time_limit`、`pass_score`、`max_attempts`、`show_answer`、`is_public`、`is_hidden`、`allow_ai_grading`、`questions`（题目数组），以及时间窗/排行榜：`start_time`、`end_time`（ISO8601，须同时设置或同时留空，结束须晚于开考）、`freeze_minutes`（结束前 N 分钟自动封榜，0 关闭）、`leaderboard_enabled`、`leaderboard_view_incomplete`、`stats_public`（1=学生可查看统计，默认 0）。
+需教师及以上。必填 `title`；可选 `description`、`time_limit`、`pass_score`、`max_attempts`、`show_answer`、`is_public`、`is_hidden`、`allow_ai_grading`、`questions`（题目数组），以及时间窗/排行榜：`start_time`、`end_time`（ISO8601，须同时设置或同时留空，结束须晚于开考）、`freeze_minutes`（结束前 N 分钟自动封榜，0 关闭）、`leaderboard_enabled`、`leaderboard_view_incomplete`、`stats_public`（1=学生可查看统计，默认 0）、`is_survey`（1=问卷模式，默认 0）、`is_anonymous`（1=匿名问卷，仅 `is_survey=1` 时生效，否则归零）。
+
+问卷模式下不判分、排行榜强制关闭（即使传 `leaderboard_enabled=true` 也会落库为 0），且不允许包含编程题（含编程题时返回 400「问卷模式不支持编程题（不判分）。」）。
 
 ### GET /exams/:id — 试卷详情
 
-开考前对考生返回 403「考试尚未开始。」；教师/管理员不受时间窗限制。
+开考前对考生返回 403「考试尚未开始。」；教师/管理员不受时间窗限制。返回 `is_survey`、`is_anonymous` 与 `survey_submitted`（当前用户是否已提交问卷）、`survey_submitted_at`（提交时刻）；匿名问卷的 `survey_submitted_at` 恒为 `null`，非问卷 `survey_submitted` 恒为 `false`。
 
 ### PUT /exams/:id — 编辑试卷
 
-需教师及以上。字段同创建；另支持封榜控制：`manual_frozen`（`true` 封榜、`false` 解封）、`unfrozen`（`true` 恢复自动封榜，与 `manual_frozen:false` 搭配使用）、`stats_public`（切换学生能否查看统计）。
+需教师及以上。字段同创建（含 `is_survey`/`is_anonymous`）；另支持封榜控制：`manual_frozen`（`true` 封榜、`false` 解封）、`unfrozen`（`true` 恢复自动封榜，与 `manual_frozen:false` 搭配使用）、`stats_public`（切换学生能否查看统计）。关闭问卷会连带清空 `is_anonymous`；问卷模式下排行榜开关一律落库为 0；携带编程题时同样 400。
 
 ### DELETE /exams/:id — 删除试卷
 
@@ -1034,13 +1036,15 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 
 需登录且在时间窗内（开考前/结束后 403）。服务端汇总客观/主观得分并折算程序题得分。
 
+问卷（`is_survey=1`）走独立分支：不判分、不写 `exam_submissions`/`exam_answers`，只记录「已提交」标记（`exam_survey_submissions`，用于去重与计数）与匿名作答（`exam_survey_answers`，仅题目与答案）；每人仅可提交一次，重复提交 400 `ERR_ALREADY_SUBMITTED`。成功返回 201 `{ survey: true, anonymous, submitted_at }`，匿名问卷 `submitted_at` 为 `null`。
+
 ### GET /exams/:id/submission/:sid — 考生答卷详情
 
-需登录。返回成绩、逐题作答与代码提交。
+需登录。返回成绩、逐题作答与代码提交。问卷无个人答卷，不适用。
 
 ### GET /exams/:id/submissions — 试卷提交列表
 
-需教师及以上。
+需教师及以上。问卷返回 `{ total, page, limit, survey: true, anonymous, submissions }`：`total` 为已提交人数；非匿名问卷的 `submissions` 为已提交用户名单，匿名问卷恒为空数组（只回计数）。
 
 ### POST /exams/:id/grade/:sid — 手动批改
 
@@ -1052,11 +1056,13 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 
 ### GET /exams/:id/leaderboard — 试卷排行榜
 
-门禁顺序：试卷 404 → 隐藏 403 → `leaderboard_enabled=0` 返回 404 → 未完成 403（`leaderboard_view_incomplete=1` 时放开）。`?limit=` 默认 100、上限 200。每人最佳一次尝试、总分降序、同分先交卷者靠前，仅 `role=user` 入榜；封榜期只计冻结时刻前的提交；返回 `my`（本人名次）。
+门禁顺序：试卷 404 → 隐藏 403 → `leaderboard_enabled=0` 返回 404 → 未完成 403（`leaderboard_view_incomplete=1` 时放开）。问卷（`is_survey=1`）一律 404。`?limit=` 默认 100、上限 200。每人最佳一次尝试、总分降序、同分先交卷者靠前，仅 `role=user` 入榜；封榜期只计冻结时刻前的提交；返回 `my`（本人名次）。
 
 ### GET /exams/:id/stats — 试卷数据统计
 
 可选认证。教师/管理员始终可看；`stats_public=1` 时学生也可看（否则 403「统计未公开，仅教师可见。」）。门禁与排行榜一致：隐藏/私有试卷、用户组不可见均拒绝；封榜期只统计冻结时刻前的交卷。聚合返回参与人数、交卷次数、评分状态分布、平均/中位/最高/最低分、满分与及格人数、按满分百分比 11 档的分数分布，以及逐题作答人数/均分/满分人数/正确率/待批改数；每人取最佳一次尝试，不含个人成绩明细。
+
+问卷返回独立结构：`{ is_survey: true, is_anonymous, summary: { participants }, questions: [...] }`，无分数相关字段；`participants` 为已提交人数，每题给 `answered`（作答人数）与 `distribution`（选择题按选项、判断题按正确/错误计数），填空/大题只给作答人数、不下发原文。
 
 ## 11.6 系统状态 `/system`
 
@@ -1186,7 +1192,7 @@ fi
 | 在线编程 | `/pages/ide.html` | IDE（需登录，三阶段状态，内存检测） |
 | 比赛 | `/pages/contests.html` | 比赛列表 |
 | 比赛详情 | `/pages/contest.html?id=X` | 题目列表、排行榜 |
-| 数据统计 | `/pages/stats.html?type=exam&id=X` | 试卷/比赛聚合统计（教师始终可见，学生需开关打开） |
+| 数据统计 | `/pages/stats.html?type=exam&id=X` | 试卷/比赛聚合统计（教师始终可见，学生需开关打开；问卷显示参与人数与逐题作答分布） |
 | 文章 | `/pages/articles.html` | 文章列表 |
 | 文章详情 | `/pages/article.html?id=X` | Markdown 文章 |
 | 文章编辑 | `/pages/article-edit.html` | 发布/编辑文章 |
