@@ -77,7 +77,7 @@ function remove(id) {
 }
 
 function getParentReply(parentId, discussionId) {
-  return db.prepare('SELECT id, parent_id FROM discussion_replies WHERE id = ? AND discussion_id = ?').get(parentId, discussionId);
+  return db.prepare('SELECT id, parent_id, author_id FROM discussion_replies WHERE id = ? AND discussion_id = ?').get(parentId, discussionId);
 }
 
 function insertReply(discussion_id, parent_id, content, author_id) {

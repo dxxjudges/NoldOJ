@@ -5,8 +5,9 @@ const { requireAuth, requireRole, optionalAuth } = require('../middleware/auth')
 const { parsePageLimit } = require('../utils/pagination');
 const { isStaff } = require('../utils/roles');
 const { buildUpdates } = require('../utils/db');
-const { buildUserProblemMap, acceptedTotals, compareByScore, buildStandings, standingsPayload } = require('../utils/standings');
+const { buildUserProblemMap, mergeBest, acceptedTotals, compareByScore, buildStandings, standingsPayload } = require('../utils/standings');
 const { createRateLimit } = require('../middleware/ratelimit');
+const crypto = require('crypto');
 
 // R9-3: 一键查重限流（每分钟最多 5 次）
 const plagiarismRateLimit = createRateLimit({ windowMs: 60000, max: 5 });
@@ -104,7 +105,7 @@ router.get('/:id', optionalAuth, (req, res) => {
 });
 
 router.post('/', requireAuth, requireRole('teacher'), (req, res) => {
-  const { title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, stats_public } = req.body;
+  const { title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, stats_public, team_mode, max_team_size } = req.body;
   if (!title || !start_time || !end_time) {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'title, start_time, and end_time are required.' });
   }
@@ -115,7 +116,8 @@ router.post('/', requireAuth, requireRole('teacher'), (req, res) => {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'end_time must be after start_time.' });
   }
   const fm = Math.max(0, parseInt(freeze_minutes) || 0);
-  const result = contestsRepo.insert(title, description || '', start_time, end_time, is_virtual ? 1 : 0, fm, is_hidden ? 1 : 0, req.user.id, stats_public ? 1 : 0);
+  const maxTeamSize = Math.min(10, Math.max(1, parseInt(max_team_size) || 3));
+  const result = contestsRepo.insert(title, description || '', start_time, end_time, is_virtual ? 1 : 0, fm, is_hidden ? 1 : 0, req.user.id, stats_public ? 1 : 0, team_mode ? 1 : 0, maxTeamSize);
   const contest = contestsRepo.get(result.lastInsertRowid);
   res.status(201).json(contest);
 });
@@ -125,7 +127,7 @@ router.put('/:id', requireAuth, requireRole('teacher'), (req, res) => {
   if (!contest) {
     return sendNotFound(res, 'Contest not found.');
   }
-  const { title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, stats_public } = req.body;
+  const { title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, stats_public, team_mode, max_team_size } = req.body;
   const u = buildUpdates([
     { key: 'title', value: title },
     { key: 'description', value: description },
@@ -134,7 +136,9 @@ router.put('/:id', requireAuth, requireRole('teacher'), (req, res) => {
     { key: 'is_virtual', value: is_virtual, transform: v => v ? 1 : 0 },
     { key: 'freeze_minutes', value: freeze_minutes, transform: v => Math.max(0, parseInt(v) || 0) },
     { key: 'is_hidden', value: is_hidden, transform: v => v ? 1 : 0 },
-    { key: 'stats_public', value: stats_public, transform: v => v ? 1 : 0 }
+    { key: 'stats_public', value: stats_public, transform: v => v ? 1 : 0 },
+    { key: 'team_mode', value: team_mode, transform: v => v ? 1 : 0 },
+    { key: 'max_team_size', value: max_team_size, transform: v => Math.min(10, Math.max(1, parseInt(v) || 3)) }
   ]);
 
   if (u.count === 0) {
@@ -218,6 +222,18 @@ router.post('/:id/invite', requireAuth, requireRole('teacher'), (req, res) => {
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'User already in contest.' });
   }
   contestsRepo.inviteParticipant(contest.id, user_id, req.user.id);
+  // 通知中心：告知被邀请者（失败不影响邀请本身）
+  try {
+    const { notifyUser } = require('../services/notifications');
+    notifyUser(user_id, {
+      type: 'contest',
+      title: `你被邀请参加比赛「${contest.title}」`,
+      content: `邀请人：${req.user.username}`,
+      link: `/pages/contest.html?id=${contest.id}`
+    });
+  } catch {
+    // 尽力而为
+  }
   res.status(201).json({ message: `${user.username} has been invited.` });
 });
 
@@ -240,6 +256,159 @@ router.post('/:id/join', requireAuth, (req, res) => {
   }
   contestsRepo.joinParticipant(contest.id, req.user.id);
   res.json({ message: 'Joined contest.' });
+});
+
+// ── 比赛组队（仅 team_mode=1 的比赛可用）──
+function contestTeamError(req, res) {
+  const contest = contestsRepo.get(req.params.id);
+  if (!contest) {
+    sendNotFound(res, 'Contest not found.');
+    return null;
+  }
+  if (contest.is_hidden && !isStaff(req.user.role)) {
+    sendNotFound(res, 'Contest not found.');
+    return null;
+  }
+  if (!canView(req, 'contest', contest.id)) {
+    sendForbidden(res, visibilityDeniedMessage('contest'));
+    return null;
+  }
+  if (!contest.team_mode) {
+    res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'This contest is not in team mode.' });
+    return null;
+  }
+  return contest;
+}
+
+function newInviteCode() {
+  return crypto.randomBytes(6).toString('hex').slice(0, 8).toUpperCase();
+}
+
+function joinContestAsParticipant(contest, userId) {
+  if (!contestsRepo.findParticipant(contest.id, userId)) {
+    contestsRepo.joinParticipant(contest.id, userId);
+  }
+}
+
+router.post('/:id/teams', requireAuth, (req, res) => {
+  const contest = contestTeamError(req, res);
+  if (!contest) return;
+  const name = String(req.body.name ?? '').trim();
+  if (!name || name.length > 40) {
+    return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '队伍名称需为 1-40 个字符。' });
+  }
+  if (contestsRepo.findUserTeam(contest.id, req.user.id)) {
+    return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '你已在该比赛的某个队伍中。' });
+  }
+  if (contestsRepo.findTeamByName(contest.id, name)) {
+    return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '该队名已被使用。' });
+  }
+  let created = null;
+  for (let i = 0; i < 5 && !created; i++) {
+    try {
+      created = contestsRepo.insertTeam(contest.id, name, newInviteCode(), req.user.id);
+    } catch {
+      // 邀请码撞车：换一个再试（UNIQUE 约束兜底）
+    }
+  }
+  if (!created) {
+    return res.status(500).json({ code: 1, reason: 'ERR_INTERNAL', message: 'Failed to create team.' });
+  }
+  const team = contestsRepo.findTeamById(created.lastInsertRowid);
+  contestsRepo.addTeamMember(team.id, contest.id, req.user.id);
+  joinContestAsParticipant(contest, req.user.id);
+  res.status(201).json({ ...team, members: contestsRepo.teamMembers(team.id), is_owner: true });
+});
+
+router.post('/:id/teams/join', requireAuth, (req, res) => {
+  const contest = contestTeamError(req, res);
+  if (!contest) return;
+  const code = String(req.body.invite_code ?? '').trim().toUpperCase();
+  if (!code) {
+    return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'invite_code is required.' });
+  }
+  const team = contestsRepo.findTeamByCode(code);
+  if (!team || team.contest_id !== contest.id) {
+    return sendNotFound(res, 'Invite code not found.');
+  }
+  if (contestsRepo.findUserTeam(contest.id, req.user.id)) {
+    return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '你已在该比赛的某个队伍中。' });
+  }
+  // 队伍人数上限受比赛配置约束
+  if (contestsRepo.countTeamMembers(team.id) >= (contest.max_team_size || 3)) {
+    return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '队伍人数已满。' });
+  }
+  contestsRepo.addTeamMember(team.id, contest.id, req.user.id);
+  joinContestAsParticipant(contest, req.user.id);
+  res.json({ ...team, members: contestsRepo.teamMembers(team.id), is_owner: team.owner_id === req.user.id });
+});
+
+router.get('/:id/teams/mine', requireAuth, (req, res) => {
+  const contest = contestTeamError(req, res);
+  if (!contest) return;
+  const team = contestsRepo.findUserTeam(contest.id, req.user.id);
+  if (!team) return res.json({ team: null });
+  res.json({
+    team: { ...team, is_owner: team.owner_id === req.user.id, members: contestsRepo.teamMembers(team.id) },
+    max_team_size: contest.max_team_size || 3
+  });
+});
+
+router.get('/:id/teams', optionalAuth, (req, res) => {
+  const contest = contestsRepo.get(req.params.id);
+  if (!contest) return sendNotFound(res, 'Contest not found.');
+  if (contest.is_hidden && !(req.user && isStaff(req.user.role))) {
+    return sendNotFound(res, 'Contest not found.');
+  }
+  if (!canView(req, 'contest', contest.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('contest'));
+  }
+  if (!contest.team_mode) return res.json({ team_mode: false, max_team_size: 0, teams: [] });
+  const staff = !!req.user && isStaff(req.user.role);
+  const myTeam = req.user ? contestsRepo.findUserTeam(contest.id, req.user.id) : null;
+  const teams = contestsRepo.listTeams(contest.id).map((t) => {
+    const member = req.user ? contestsRepo.teamMembers(t.id).find((m) => m.user_id === req.user.id) : null;
+    // 邀请码只回给队长/队员与 staff，避免任何人可观榜即拉陌生人入队
+    const revealCode = staff || (myTeam && myTeam.id === t.id) || member;
+    return {
+      id: t.id,
+      name: t.name,
+      owner_id: t.owner_id,
+      member_count: t.member_count,
+      invite_code: revealCode ? t.invite_code : null,
+      members: contestsRepo.teamMembers(t.id).map((m) => ({ user_id: m.user_id, username: m.username, nickname: m.nickname }))
+    };
+  });
+  res.json({ team_mode: true, max_team_size: contest.max_team_size || 3, teams });
+});
+
+// 退出队伍：队长退出则解散整队（成员一并移除）
+router.delete('/:id/teams/mine', requireAuth, (req, res) => {
+  const contest = contestTeamError(req, res);
+  if (!contest) return;
+  const team = contestsRepo.findUserTeam(contest.id, req.user.id);
+  if (!team) return sendNotFound(res, 'You are not in a team.');
+  if (team.owner_id === req.user.id) {
+    contestsRepo.deleteTeam(team.id);
+    return res.json({ message: '队伍已解散。', dissolved: true });
+  }
+  contestsRepo.removeTeamMember(contest.id, req.user.id);
+  res.json({ message: '已退出队伍。', dissolved: false });
+});
+
+// 解散队伍（队长或 staff）
+router.delete('/:id/teams/:tid', requireAuth, (req, res) => {
+  const contest = contestsRepo.get(req.params.id);
+  if (!contest) return sendNotFound(res, 'Contest not found.');
+  const team = contestsRepo.findTeamById(req.params.tid);
+  if (!team || team.contest_id !== contest.id) {
+    return sendNotFound(res, 'Team not found.');
+  }
+  if (team.owner_id !== req.user.id && !isStaff(req.user.role)) {
+    return sendForbidden(res, 'Only the team owner can dissolve this team.');
+  }
+  contestsRepo.deleteTeam(team.id);
+  res.json({ message: '队伍已解散。' });
 });
 
 router.get('/:id/participants', requireAuth, requireRole('teacher'), (req, res) => {
@@ -323,10 +492,46 @@ router.get('/:id/leaderboard', optionalAuth, (req, res) => {
   // 提交聚合行 → 每题最佳成绩映射（按用户分组）；选优/累计/排序/名次统一走 utils/standings
   const userMap = buildUserProblemMap(submissions);
 
-  const entries = Object.values(userMap).map(u => {
-    const totals = acceptedTotals(u.problems, problemIds);
-    return { user_id: u.user_id, username: u.username, nickname: u.nickname, total_score: totals.total_score, total_time: totals.total_time, problems: u.problems };
-  });
+  let entries;
+  if (contest.team_mode) {
+    // 组队榜：队员成绩逐题取队伍内最优，未组队者保持个人条目
+    const memberRows = contestsRepo.listTeamMemberRows(contest.id);
+    const teamMap = {};
+    for (const t of contestsRepo.listTeams(contest.id)) {
+      teamMap[t.id] = { team_id: t.id, team_name: t.name, problems: {}, members: [] };
+    }
+    const userTeam = {};
+    for (const m of memberRows) {
+      userTeam[m.user_id] = m.team_id;
+      if (teamMap[m.team_id]) {
+        teamMap[m.team_id].members.push({ user_id: m.user_id, username: m.username, nickname: m.nickname });
+      }
+    }
+    for (const u of Object.values(userMap)) {
+      const tid = userTeam[u.user_id];
+      if (tid && teamMap[tid]) mergeBest(teamMap[tid].problems, u.problems);
+    }
+    entries = Object.values(teamMap)
+      .filter(t => t.members.length > 0)
+      .map(t => {
+        const totals = acceptedTotals(t.problems, problemIds);
+        return {
+          team_id: t.team_id, team_name: t.team_name, username: t.team_name, nickname: '',
+          is_team: true, members: t.members,
+          total_score: totals.total_score, total_time: totals.total_time, problems: t.problems
+        };
+      });
+    for (const u of Object.values(userMap)) {
+      if (userTeam[u.user_id]) continue;
+      const totals = acceptedTotals(u.problems, problemIds);
+      entries.push({ user_id: u.user_id, username: u.username, nickname: u.nickname, total_score: totals.total_score, total_time: totals.total_time, problems: u.problems });
+    }
+  } else {
+    entries = Object.values(userMap).map(u => {
+      const totals = acceptedTotals(u.problems, problemIds);
+      return { user_id: u.user_id, username: u.username, nickname: u.nickname, total_score: totals.total_score, total_time: totals.total_time, problems: u.problems };
+    });
+  }
 
   // 排序：总分降序 → 同分用时升序，随后统一补齐 rank
   const leaderboard = buildStandings(entries, (a, b) => compareByScore(a, b, (x, y) => x.total_time - y.total_time));

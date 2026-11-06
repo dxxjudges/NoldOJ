@@ -476,6 +476,11 @@
             <input id="cStats" type="checkbox" class="w-4 h-4 text-indigo-600 rounded">
             <span>允许学生查看统计（教师始终可看）</span>
           </label>
+          <label class="flex items-center gap-2 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl text-sm text-gray-700 dark:text-gray-300">
+            <input id="cTeamMode" type="checkbox" class="w-4 h-4 text-indigo-600 rounded">
+            <span>组队模式（选手可建队/加入队伍，按队伍排名）</span>
+          </label>
+          <input id="cMaxTeamSize" type="number" min="1" max="10" value="3" aria-label="每队最大人数" placeholder="每队最大人数" class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-800 dark:text-white">
         </div>
         <div id="cVisibilityBox" class="hidden mb-4">
           <label class="text-xs text-gray-500 dark:text-gray-400 mb-1 block">可见性（仅管理员/超级管理员可设置）</label>

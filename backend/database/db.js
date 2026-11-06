@@ -666,6 +666,78 @@ async function initDB() {
     }
   }
 
+  // ═══ 通知中心 / 错题本 / 每日一题 / 比赛组队（老库渐进升级）═══
+  // DDL 与 schema.sql 逐字一致：schema.sql 保证新库全量，这里保证老库自愈。
+  if (!cols.includes('public_code')) sqlDb.exec("ALTER TABLE users ADD COLUMN public_code INTEGER DEFAULT 1");
+  const ctColsUp = tableCols('contests');
+  if (!ctColsUp.includes('team_mode')) sqlDb.exec("ALTER TABLE contests ADD COLUMN team_mode INTEGER DEFAULT 0");
+  if (!ctColsUp.includes('max_team_size')) sqlDb.exec("ALTER TABLE contests ADD COLUMN max_team_size INTEGER DEFAULT 3");
+
+  sqlDb.exec(`CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    type TEXT NOT NULL DEFAULT 'system',
+    title TEXT NOT NULL,
+    content TEXT DEFAULT '',
+    link TEXT DEFAULT '',
+    is_read INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+  sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read)');
+
+  sqlDb.exec(`CREATE TABLE IF NOT EXISTS notebook_marks (
+    user_id INTEGER NOT NULL,
+    problem_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'mastered' CHECK(status IN ('mastered','dismissed')),
+    note TEXT DEFAULT '',
+    updated_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, problem_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE
+  )`);
+
+  sqlDb.exec(`CREATE TABLE IF NOT EXISTS daily_problems (
+    day TEXT PRIMARY KEY,
+    problem_id INTEGER NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE
+  )`);
+
+  sqlDb.exec(`CREATE TABLE IF NOT EXISTS daily_checkins (
+    user_id INTEGER NOT NULL,
+    day TEXT NOT NULL,
+    problem_id INTEGER NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, day),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE
+  )`);
+
+  sqlDb.exec(`CREATE TABLE IF NOT EXISTS contest_teams (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contest_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    invite_code TEXT UNIQUE NOT NULL,
+    owner_id INTEGER NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (contest_id) REFERENCES contests(id) ON DELETE CASCADE,
+    FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE(contest_id, name)
+  )`);
+
+  sqlDb.exec(`CREATE TABLE IF NOT EXISTS contest_team_members (
+    team_id INTEGER NOT NULL,
+    contest_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    joined_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (contest_id, user_id),
+    FOREIGN KEY (team_id) REFERENCES contest_teams(id) ON DELETE CASCADE,
+    FOREIGN KEY (contest_id) REFERENCES contests(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+  sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_contest_team_members_team ON contest_team_members(team_id)');
+
   return sqlDb;
 }
 

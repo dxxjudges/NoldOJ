@@ -1,4 +1,4 @@
-﻿const http = require('http');
+﻿﻿﻿﻿﻿﻿const http = require('http');
 const express = require('express');
 // 必须紧跟 express 加载：给 Express 4 的 async 路由处理器补上错误边界。
 // 之前 async handler 同步抛错（如 db.prepare 失败）会变成 unhandledRejection，
@@ -203,6 +203,9 @@ async function main() {
   const statusRoutes = require('../routes/status');
   const examRoutes = require('../routes/exams');
   const groupRoutes = require('../routes/groups');
+  const notificationRoutes = require('../routes/notifications');
+  const notebookRoutes = require('../routes/notebook');
+  const dailyRoutes = require('../routes/daily');
 
   app.use('/api/v1/auth', authRoutes);
   app.use('/api/v1/problems', problemRoutes);
@@ -227,6 +230,9 @@ async function main() {
   app.use('/api/v1/system', statusRoutes);
   app.use('/api/v1/exams', examRoutes);
   app.use('/api/v1/groups', groupRoutes);
+  app.use('/api/v1/notifications', notificationRoutes);
+  app.use('/api/v1/notebook', notebookRoutes);
+  app.use('/api/v1/daily', dailyRoutes);
 
   const routeList = [
     ['/api/v1/auth', '认证'],
@@ -250,6 +256,9 @@ async function main() {
     ['/api/v1/statistics', '个人数据看板'],
     ['/api/v1/system', '系统状态'],
     ['/api/v1/exams', '试卷'],
+    ['/api/v1/notifications', '通知中心'],
+    ['/api/v1/notebook', '错题本'],
+    ['/api/v1/daily', '每日一题'],
   ];
   logInfo('ROUTER', `Registered ${routeList.length} route groups:`);
   for (const [path, name] of routeList) {

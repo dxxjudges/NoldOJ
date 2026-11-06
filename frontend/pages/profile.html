@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+﻿﻿﻿﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -140,6 +140,13 @@
                   </div>
                 </div>
               </div>
+              <div class="border-t border-gray-100 dark:border-gray-700 pt-3 mt-2">
+                <p class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">代码公开</p>
+                <div class="flex items-center space-x-2">
+                  <input type="checkbox" id="edPublicCode" class="rounded text-indigo-600 dark:text-indigo-400" ${u.public_code !== 0 ? 'checked' : ''}>
+                  <label for="edPublicCode" class="text-sm text-gray-700 dark:text-gray-300">AC 后公开我的通过代码（他人可在题目页查看）</label>
+                </div>
+              </div>
               <div>
                 <label for="edPrefLang" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">偏好语言</label>
                 <select id="edPrefLang" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none dark:bg-gray-800 dark:text-white">
@@ -180,6 +187,7 @@
           hide_achievements: document.getElementById('edHideAchievements').checked,
           hide_dashboard: document.getElementById('edHideDashboard').checked,
           hide_favorites: document.getElementById('edHideFavorites').checked,
+          public_code: document.getElementById('edPublicCode').checked,
           preferred_language: prefLang
         });
         const user = getUser();

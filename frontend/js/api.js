@@ -285,12 +285,17 @@ function renderNav(activePage) {
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
               <span id="annBadge" class="hidden absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full px-1.5 min-w-[18px] text-center">0</span>
             </a>
+            ${user ? `<a href="/pages/notifications.html" aria-label="通知" class="relative p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title="通知中心">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+              <span id="notifBadge" class="hidden absolute -top-1 -right-1 bg-indigo-500 text-white text-xs rounded-full px-1.5 min-w-[18px] text-center">0</span>
+            </a>` : ''}
             ${user ? `
               <div class="flex items-center space-x-2 flex-shrink-0">
                 <span class="text-sm text-gray-700 dark:text-gray-300">${escapeHtml(user.nickname || user.username || '')}</span>
                 <span id="nav-rating" class="px-1.5 py-0.5 text-xs rounded-full bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300">R:${user.rating || 1500}</span>
                 ${roleBadge(user.role)}
                 <a href="/pages/profile.html" class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">资料</a>
+                <a href="/pages/notebook.html" class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">错题本</a>
                 <a href="/pages/favorites.html" class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">收藏</a>
                 <a href="/pages/achievements.html" class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">成就</a>
                 <a href="/pages/dashboard.html" class="text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">看板</a>
@@ -310,6 +315,8 @@ function renderNav(activePage) {
         <a href="/pages/problems.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='problems'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('problems')}>题库</a>
         <a href="/pages/problem-sets.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='problem-sets'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('problem-sets')}>题单</a>
         <a href="/pages/submissions.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='submissions'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('submissions')}>提交记录</a>
+        ${user ? `<a href="/pages/notebook.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='notebook'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('notebook')}>错题本</a>
+        <a href="/pages/notifications.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='notifications'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('notifications')}>通知中心</a>` : ''}
         <a href="/pages/articles.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='articles'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('articles')}>文章</a>
         <a href="/pages/announcements.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='announcements'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('announcements')}>公告</a>
         <a href="/pages/ide.html" class="block px-3 py-2 rounded-md text-base font-medium ${activePage==='ide'?'bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300':'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}"${cur('ide')}>在线编程</a>
@@ -430,6 +437,29 @@ function updateAnnouncementBadge() {
   }
 }
 
+// 通知中心未读角标：数值由服务端返回，避免本地计数漂移
+function updateNotifBadge(count) {
+  const badge = document.getElementById('notifBadge');
+  if (!badge) return;
+  const n = Number(count) || 0;
+  if (n > 0) {
+    badge.textContent = n > 99 ? '99+' : String(n);
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
+async function refreshNotifBadge() {
+  if (!getToken()) return;
+  try {
+    const r = await apiCall('GET', '/notifications/unread-count');
+    updateNotifBadge(r && r.unread);
+  } catch {
+    // 角标不是关键路径，失败静默
+  }
+}
+
 async function initSocket() {
   const token = getToken();
   if (!token) return;
@@ -458,6 +488,14 @@ async function initSocket() {
       }
     });
 
+    // 个人通知推送
+    NoldOJSocket.on('notification', (msg) => {
+      if (msg && msg.data) {
+        showToast(`🔔 ${msg.data.title}`, 'info');
+        refreshNotifBadge();
+      }
+    });
+
     // 评测状态推送 (全局监听, 页面可覆盖 onJudgeStatus)
     NoldOJSocket.on('judge_status', (msg) => {
       if (typeof window.onJudgeStatus === 'function') {
@@ -473,6 +511,7 @@ async function initSocket() {
     });
 
     updateAnnouncementBadge();
+    refreshNotifBadge();
   } catch (err) {
     console.warn('[Socket] Init failed:', err.message);
   }

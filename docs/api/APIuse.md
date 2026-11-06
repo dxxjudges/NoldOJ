@@ -1,4 +1,4 @@
-﻿# NoldOJ API 接口文档
+﻿﻿﻿﻿# NoldOJ API 接口文档
 
 所有接口前缀为 `/api/v1`。响应格式统一为 JSON。
 
@@ -284,7 +284,19 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 
 ### GET /problems/:id/discussions — 题目讨论列表
 
+
+
+
+
 无需认证。分页返回该题目下的讨论帖列表（含回复数）。
+
+
+
+
+
+### GET /problems/:id/ac-submissions — 题目通过代码列表
+
+可选认证。返回每题「最新一条 AC」的用户列表（每人最多一条，最多 50 条）。仅包含作者开启 `public_code` 的非考试提交；查看者本人的提交始终可见；匿名访问只返回已公开的代码。
 
 ### POST /problems/:id/plagiarism-check — 对题目发起代码查重
 
@@ -390,6 +402,10 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 
 需管理员权限。编号自动回收。
 
+### GET /submissions/:id/code — 读取通过代码
+
+需认证。仅 `accepted` 且非考试提交可读；允许作者本人、教师及以上角色、或作者开启 `public_code` 时访问。返回 `{ id, language, source_code, files }`。
+
 **安全隔离**：用户代码在三层隔离环境中执行（低完整性级别 + Job Object 资源限制 + 受限令牌/AppContainer 权限隔离）。编译与运行阶段均在受控环境中执行，Job Object 兜底 CPU/内存/进程数限制。
 
 ---
@@ -422,6 +438,8 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 ### POST /problems/:id/hint — AI 提示（AI Hint）
 
 需认证。学生对某题失败 2 次后可获取方向性算法提示（不给完整代码，300 字以内中文）。每用户每题 60 秒冷却。
+
+**比赛禁用**：用户参与的比赛（含虚拟比赛）正在进行且包含该题时，直接返回 `403`（`比赛「…」进行中，AI 思路提示已禁用`），比赛结束后自动恢复。
 
 **请求体：**
 ```json
@@ -688,6 +706,32 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 ### GET /contests/:id/discussions — 比赛讨论列表
 
 无需认证。分页返回该比赛的讨论帖列表。
+
+### GET /contests/:id/teams — 队伍列表（仅组队模式）
+
+可选认证。`team_mode=1` 时返回队伍、成员与人数上限；`invite_code` 只回给该队队员与教师及以上角色，其他查看者为 `null`。
+
+### POST /contests/:id/teams — 创建队伍
+
+需认证。请求体 `{ name }`（1-40 字符）。创建者自动成为队长/队员并自动报名该比赛；同一比赛一人只能在一个队伍，队名比赛内唯一。
+
+### POST /contests/:id/teams/join — 用邀请码加入
+
+需认证。请求体 `{ invite_code }`。校验队伍属于该比赛、未满员（`max_team_size`）、本人尚未组队；成功后自动报名比赛。
+
+### GET /contests/:id/teams/mine — 我的队伍
+
+需认证。未组队时返回 `{ "team": null }`，否则返回队伍（含 `is_owner`、成员列表）与 `max_team_size`。
+
+### DELETE /contests/:id/teams/mine — 退出/解散队伍
+
+需认证。队长退出则解散整队（成员一并移除，`dissolved: true`），普通成员仅退出。
+
+### DELETE /contests/:id/teams/:tid — 解散队伍
+
+需认证。队长或教师及以上角色可解散。
+
+**排行榜聚合**：组队模式下 `GET /contests/:id/leaderboard` 以队伍为条目（`is_team`、`team_name`、`members`），队员成绩逐题取最优（AC 优先 → 分数 → 用时）后累计；未组队的参赛者仍以个人身份入榜。
 
 ---
 
@@ -965,6 +1009,60 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 - `403`：目标用户已隐藏收藏，且当前访问者非本人/admin/su
 - `404`：user_id 对应的用户不存在，或收藏/取消收藏的题目不存在
 - `400`：user_id 格式非法
+
+---
+
+## 10.13 通知中心 `/notifications`
+
+### GET /notifications — 通知列表
+
+需认证。查询参数 `page`、`size`（默认 20、上限 50）、`unread=1`（只看未读）。返回 `{ total, page, size, unread, notifications }`，按 id 倒序。
+
+### GET /notifications/unread-count — 未读数量
+
+需认证。返回 `{ unread }`。
+
+### PUT /notifications/read-all — 全部标记已读
+
+需认证。返回 `{ unread: 0 }`。
+
+### PUT /notifications/:id/read — 标记单条已读
+
+需认证。仅能操作本人通知，重复标记不报错。
+
+### DELETE /notifications/:id — 删除通知
+
+需认证。仅能删除本人通知。
+
+**推送**：新增通知通过 Socket.IO 房间 `user:<id>` 的 `notification` 事件实时下发；判题结束（考试提交除外）、讨论被回复、全局公告发布、比赛邀请均会写入通知。
+
+---
+
+## 10.14 错题本 `/notebook`
+
+### GET /notebook — 错题列表
+
+需认证。分页返回 `{ total, page, size, items }`。错题 = 本人有非考试提交、但尚无 AC 的题目；`dismissed` 的题目不再返回。`items` 含 `problem_id,title,difficulty,attempt_count,last_status,mark_status,note,updated_at`。
+
+### PUT /notebook/:problemId — 标记/保存笔记
+
+需认证。请求体 `{ status, note }`，`status` 取 `mastered` 或 `dismissed`，`note` 最长 2000 字符；已存在的标记会被更新（幂等）。
+
+### DELETE /notebook/:problemId — 移出错题本
+
+需认证。以 `dismissed` 标记隐藏（不删除标记），避免该题因已有错提交而重新出现。
+
+---
+
+## 10.15 每日一题 `/daily`
+
+### GET /daily/today — 今日题目与打卡状态
+
+可选认证。按 UTC 日期对公开非考试题目做确定性哈希选题（同一天全站同一题），返回 `{ day, problem, solved, checked_in, streak }`。
+
+### POST /daily/checkin — 打卡
+
+需认证。需当天已有该题的非考试 AC 提交，否则 400「请先通过今日题目后再打卡。」；重复打卡幂等，返回 `{ checked_in: true, day, streak }`。
 
 ---
 

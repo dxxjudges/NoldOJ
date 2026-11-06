@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>错题本 - NoldOJ</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <script src="/js/tailwind.js"></script>
+  <script>tailwind.config={darkMode:'class'}</script>
+  <script src="/js/api.js"></script>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
+  <div id="nav"></div>
+  <div class="max-w-5xl mx-auto px-4 py-8">
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-3xl font-bold text-gray-900 dark:text-white">📕 错题本</h1>
+      <div id="countBadge" class="text-sm text-gray-500 dark:text-gray-400"></div>
+    </div>
+    <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">自动收录你提交过但尚未通过的题目；标记「已掌握」或「移出」后不再出现。</p>
+    <div id="list" aria-live="polite" class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm dark:shadow-gray-900/30 border border-gray-100 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-700"></div>
+    <div id="pager" class="mt-6 flex justify-center gap-2 flex-wrap"></div>
+  </div>
+  <script>
+    document.getElementById('nav').innerHTML = renderNav('notebook');
+    requireAuth();
+    let page = 1;
+    const DIFF = ['入门', '简单', '中等', '较难', '困难', '极难'];
+
+    async function load(p) {
+      page = p || page;
+      try {
+        const data = await apiCall('GET', `/notebook?page=${page}&size=20`);
+        document.getElementById('countBadge').textContent = `共 ${data.total} 道待攻克`;
+        const list = document.getElementById('list');
+        if (!data.items || data.items.length === 0) {
+          list.innerHTML = '<div class="text-center text-gray-400 dark:text-gray-500 py-16">错题本是空的，继续保持！</div>';
+          document.getElementById('pager').innerHTML = '';
+          return;
+        }
+        list.innerHTML = data.items.map(it => `
+          <div class="px-5 py-4">
+            <div class="flex items-center justify-between gap-3 flex-wrap">
+              <a href="/pages/problem.html?id=${it.problem_id}" class="font-semibold text-gray-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 truncate">
+                #${it.problem_id} ${escapeHtml(it.title)}
+              </a>
+              <div class="flex items-center gap-2 flex-shrink-0">
+                <button onclick="markMastered(${it.problem_id})" class="px-3 py-1.5 text-xs rounded-lg bg-green-600 text-white hover:bg-green-700">已掌握</button>
+                <button onclick="dismiss(${it.problem_id})" class="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700">移出</button>
+              </div>
+            </div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-3 flex-wrap">
+              <span>难度: ${DIFF[it.difficulty] || it.difficulty}</span>
+              <span>尝试: ${it.attempt_count} 次</span>
+              <span>最近: ${escapeHtml(statusText(it.last_status))}</span>
+              ${it.mark_status ? `<span class="text-green-600 dark:text-green-400">${it.mark_status === 'mastered' ? '已掌握' : '已移出'}</span>` : ''}
+            </div>
+            <div class="flex items-center gap-2 mt-2">
+              <input id="note-${it.problem_id}" aria-label="错题笔记 ${it.problem_id}" value="${escapeHtml(it.note || '')}" placeholder="记下思路/易错点…" class="flex-1 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-800 dark:text-white focus:ring-2 focus:ring-indigo-500 outline-none">
+              <button onclick="saveNote(${it.problem_id})" class="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">保存笔记</button>
+            </div>
+          </div>
+        `).join('');
+        const totalPages = Math.ceil(data.total / 20) || 1;
+        let ph = '';
+        for (let i = 1; i <= totalPages; i++) {
+          ph += `<button onclick="load(${i})" class="px-3 py-1 text-sm rounded-lg ${i===page?'bg-indigo-600 text-white':'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700'}">${i}</button>`;
+        }
+        document.getElementById('pager').innerHTML = ph;
+      } catch (err) {
+        document.getElementById('list').innerHTML = `<p class="text-center text-red-500 py-16">${escapeHtml(err.message) || '加载失败'}</p>`;
+      }
+    }
+
+    async function markMastered(pid) {
+      try {
+        await apiCall('PUT', `/notebook/${pid}`, { status: 'mastered' });
+        showToast('已标记为掌握', 'success');
+        load();
+      } catch (err) {
+        showToast(err.message || '操作失败', 'error');
+      }
+    }
+
+    async function dismiss(pid) {
+      try {
+        await apiCall('DELETE', `/notebook/${pid}`);
+        showToast('已移出错题本', 'success');
+        load();
+      } catch (err) {
+        showToast(err.message || '操作失败', 'error');
+      }
+    }
+
+    async function saveNote(pid) {
+      try {
+        const note = document.getElementById(`note-${pid}`).value;
+        await apiCall('PUT', `/notebook/${pid}`, { note });
+        showToast('笔记已保存', 'success');
+      } catch (err) {
+        showToast(err.message || '保存失败', 'error');
+      }
+    }
+
+    load(1);
+  </script>
+</body>
+</html>

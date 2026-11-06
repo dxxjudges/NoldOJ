@@ -49,9 +49,9 @@ function countParticipants(contestId) {
   return db.prepare('SELECT COUNT(*) as c FROM contest_participants WHERE contest_id = ?').get(contestId).c;
 }
 
-function insert(title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, created_by, stats_public = 0) {
-  return db.prepare('INSERT INTO contests (title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, stats_public, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-    title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, stats_public ? 1 : 0, created_by
+function insert(title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, created_by, stats_public = 0, team_mode = 0, max_team_size = 3) {
+  return db.prepare('INSERT INTO contests (title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, stats_public, team_mode, max_team_size, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    title, description, start_time, end_time, is_virtual, freeze_minutes, is_hidden, stats_public ? 1 : 0, team_mode ? 1 : 0, max_team_size, created_by
   );
 }
 
@@ -178,9 +178,82 @@ function listDiscussions(contestId, limit, offset) {
   `).all(contestId, limit, offset);
 }
 
+// ── 比赛组队（team_mode=1 时可用）──
+function findUserTeam(contestId, userId) {
+  return db.prepare(`
+    SELECT t.* FROM contest_teams t
+    JOIN contest_team_members m ON m.team_id = t.id
+    WHERE m.contest_id = ? AND m.user_id = ?
+  `).get(contestId, userId);
+}
+
+function findTeamById(teamId) {
+  return db.prepare('SELECT * FROM contest_teams WHERE id = ?').get(teamId);
+}
+
+function findTeamByName(contestId, name) {
+  return db.prepare('SELECT id FROM contest_teams WHERE contest_id = ? AND name = ?').get(contestId, name);
+}
+
+function findTeamByCode(inviteCode) {
+  return db.prepare('SELECT * FROM contest_teams WHERE invite_code = ?').get(inviteCode);
+}
+
+function insertTeam(contestId, name, inviteCode, ownerId) {
+  return db.prepare('INSERT INTO contest_teams (contest_id, name, invite_code, owner_id) VALUES (?, ?, ?, ?)')
+    .run(contestId, name, inviteCode, ownerId);
+}
+
+function deleteTeam(teamId) {
+  db.prepare('DELETE FROM contest_teams WHERE id = ?').run(teamId);
+}
+
+function countTeamMembers(teamId) {
+  return db.prepare('SELECT COUNT(*) as c FROM contest_team_members WHERE team_id = ?').get(teamId).c;
+}
+
+function addTeamMember(teamId, contestId, userId) {
+  db.prepare('INSERT INTO contest_team_members (team_id, contest_id, user_id) VALUES (?, ?, ?)').run(teamId, contestId, userId);
+}
+
+function removeTeamMember(contestId, userId) {
+  db.prepare('DELETE FROM contest_team_members WHERE contest_id = ? AND user_id = ?').run(contestId, userId);
+}
+
+function teamMembers(teamId) {
+  return db.prepare(`
+    SELECT m.user_id, m.joined_at, u.username, u.nickname, u.role
+    FROM contest_team_members m LEFT JOIN users u ON u.id = m.user_id
+    WHERE m.team_id = ? ORDER BY m.joined_at, m.user_id
+  `).all(teamId);
+}
+
+function listTeams(contestId) {
+  return db.prepare(`
+    SELECT t.id, t.name, t.invite_code, t.owner_id, t.created_at,
+      (SELECT COUNT(*) FROM contest_team_members m WHERE m.team_id = t.id) as member_count
+    FROM contest_teams t WHERE t.contest_id = ? ORDER BY t.id
+  `).all(contestId);
+}
+
+// 榜单聚合用：整场比赛的「队伍 → 成员」映射行
+function listTeamMemberRows(contestId) {
+  return db.prepare(`
+    SELECT m.team_id, m.user_id, u.username, u.nickname
+    FROM contest_team_members m LEFT JOIN users u ON u.id = m.user_id
+    WHERE m.contest_id = ? ORDER BY m.team_id, m.joined_at
+  `).all(contestId);
+}
+
+function transferOwner(teamId, userId) {
+  db.prepare('UPDATE contest_teams SET owner_id = ? WHERE id = ?').run(userId, teamId);
+}
+
 module.exports = {
   countList, list, getWithCreator, get, findContest, listStaffProblems, listProblems, countParticipants,
   insert, update, setVisibility, findProblem, findContestProblem, maxSortOrder, insertContestProblem, deleteContestProblem,
   deleteCascade, getUser, findParticipant, inviteParticipant, joinParticipant, listParticipants, removeParticipant,
-  getLeaderboardSubmissions, unfreeze, listAnnouncements, listProblemIds, countDiscussions, listDiscussions
+  getLeaderboardSubmissions, unfreeze, listAnnouncements, listProblemIds, countDiscussions, listDiscussions,
+  findUserTeam, findTeamById, findTeamByName, findTeamByCode, insertTeam, deleteTeam, countTeamMembers,
+  addTeamMember, removeTeamMember, teamMembers, listTeams, listTeamMemberRows, transferOwner
 };

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+﻿﻿﻿﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -36,6 +36,7 @@
     const contestId = params.get('contest_id');
     let currentProblem = null;
     let currentContest = null;
+    let contestRunning = false;
 
     async function loadProblem() {
       if (!pid) { document.getElementById('content').innerHTML = '<p class="text-red-500">未指定题目 ID</p>'; return; }
@@ -49,6 +50,10 @@
           try {
             const c = await apiCall('GET', `/contests/${contestId}`);
             currentContest = c;
+            // 比赛进行中：隐藏 AI 提示入口（后端同样会拒绝，此处仅为避免误导）
+            const s = new Date(c.start_time).getTime();
+            const e = new Date(c.end_time).getTime();
+            contestRunning = !Number.isNaN(s) && !Number.isNaN(e) && Date.now() >= s && Date.now() <= e;
           } catch {}
         }
 
@@ -273,6 +278,9 @@
           <!-- Solutions Section -->
           <div id="solutions"></div>
 
+          <!-- 通过代码（作者开启公开后可见）-->
+          <div id="acCodeSection" class="mt-6"></div>
+
           <!-- Discussions Section -->
           <div id="discussionsSection" class="mt-6 bg-white dark:bg-gray-800 rounded-2xl shadow-sm dark:shadow-gray-900/30 border border-gray-100 dark:border-gray-700 p-6">
             <div class="flex items-center justify-between mb-4">
@@ -302,6 +310,34 @@
           }
         } catch {}
 
+        // 通过代码列表：仅登录用户加载（匿名访问时不暴露他人提交）
+        try {
+          if (getToken()) {
+            const res = await apiCall('GET', `/problems/${pid}/ac-submissions`);
+            const list = res.submissions || [];
+            if (list.length > 0) {
+              document.getElementById('acCodeSection').innerHTML = `
+                <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm dark:shadow-gray-900/30 border border-gray-100 dark:border-gray-700 p-6">
+                  <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-4">💡 通过代码 <span class="text-xs font-normal text-gray-500 dark:text-gray-400">（作者公开的最新 AC）</span></h3>
+                  <div class="space-y-2">
+                    ${list.map(s => `
+                      <div class="flex items-center justify-between gap-3 text-sm flex-wrap">
+                        <div class="min-w-0">
+                          <span class="font-medium text-gray-900 dark:text-white">${escapeHtml(s.nickname || s.username || '')}</span>
+                          <span class="text-gray-500 dark:text-gray-400 ml-2">${escapeHtml(s.language)}</span>
+                          <span class="text-gray-400 dark:text-gray-500 ml-2">${s.time_used}ms / ${s.memory_used}KB</span>
+                          <span class="text-gray-400 dark:text-gray-500 ml-2">${new Date(s.created_at).toLocaleString()}</span>
+                        </div>
+                        <button onclick="showAcCode(${s.id})" class="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-600 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30">查看代码</button>
+                      </div>
+                    `).join('')}
+                  </div>
+                  <pre id="acCodeBox" class="hidden mt-4 p-4 bg-gray-900 text-gray-100 rounded-xl overflow-x-auto text-xs"></pre>
+                </div>`;
+            }
+          }
+        } catch {}
+
         renderMathDefaults(document.getElementById('content'));
         loadDiscussions(1);
       } catch (err) {
@@ -309,10 +345,24 @@
       }
     }
 
+    // 查看他人公开的通过代码（后端再次校验作者公开开关与考试隔离）
+    async function showAcCode(id) {
+      try {
+        const r = await apiCall('GET', `/submissions/${id}/code`);
+        const box = document.getElementById('acCodeBox');
+        if (!box) return;
+        box.textContent = r.source_code || (r.files || []).map(f => `// ${f.filename}\n${f.content}`).join('\n\n') || '（无代码）';
+        box.classList.remove('hidden');
+        box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } catch (err) {
+        showToast(err.message || '无法查看该代码', 'error');
+      }
+    }
+
     // 题面(#favBtn / #hintBtn) 在此之后才写入 DOM, 两处初始化都必须等渲染完成
     loadProblem().then(() => {
       initFavorite();
-      if (getToken()) {
+      if (getToken() && !contestRunning) {
         const hintBtn = document.getElementById('hintBtn');
         if (hintBtn) hintBtn.classList.remove('hidden');
       }

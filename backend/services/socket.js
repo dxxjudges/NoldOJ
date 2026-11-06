@@ -119,6 +119,15 @@ function emitContestRanking(contestId, data) {
   });
 }
 
+// 推送个人通知（通知中心）
+function emitNotification(userId, notification) {
+  if (!io) return;
+  io.to(`user:${userId}`).emit('notification', {
+    type: 'notification',
+    data: notification
+  });
+}
+
 // 广播新公告
 function emitAnnouncement(announcement) {
   if (!io) return;
@@ -128,4 +137,4 @@ function emitAnnouncement(announcement) {
   });
 }
 
-module.exports = { initSocket, emitJudgeStatus, emitContestRanking, emitAnnouncement };
+module.exports = { initSocket, emitJudgeStatus, emitContestRanking, emitNotification, emitAnnouncement };

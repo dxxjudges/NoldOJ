@@ -12,20 +12,29 @@
 //     考试榜按人取最佳一次整行（{ total_score, max_score, attempts, status, submitted_at }）
 //   - SQL 查询仍留在各 repositories 中原样不动，这里只做「结果行 → 榜单结构」的 JS 组装
 
-// 把一条提交并入「每题最佳成绩」映射：
-// AC 优先 → 同 AC 比分数 → 同分数比用时，防止 AC 被同分更快的 WA 顶成 0 分
-function applyBest(problems, s) {
-  const cur = problems[s.problem_id];
-  if (!cur) {
-    problems[s.problem_id] = { score: s.score, time_used: s.time_used, status: s.status };
-    return;
-  }
+// 比较两条「每题成绩」谁更优：AC 优先 → 同 AC 比分数 → 同分数比用时，
+// 防止 AC 被同分更快的 WA 顶成 0 分
+function betterThan(cur, next) {
+  if (!cur) return true;
   const curAc = cur.status === 'accepted';
-  const newAc = s.status === 'accepted';
-  if ((newAc && !curAc) ||
-      (newAc === curAc && (s.score > cur.score || (s.score === cur.score && s.time_used < cur.time_used)))) {
+  const nextAc = next.status === 'accepted';
+  return (nextAc && !curAc) ||
+    (nextAc === curAc && (next.score > cur.score || (next.score === cur.score && next.time_used < cur.time_used)));
+}
+
+// 把一条提交并入「每题最佳成绩」映射：
+function applyBest(problems, s) {
+  if (betterThan(problems[s.problem_id], s)) {
     problems[s.problem_id] = { score: s.score, time_used: s.time_used, status: s.status };
   }
+}
+
+// 合并两支「每题最佳成绩」映射（组队榜：队伍内各成员逐题择优），不改动 source
+function mergeBest(target, source) {
+  for (const pid of Object.keys(source)) {
+    if (betterThan(target[pid], source[pid])) target[pid] = { ...source[pid] };
+  }
+  return target;
 }
 
 // 单个用户：submissions 聚合行 → problems[problem_id] = { score, time_used, status }（虚拟比赛榜用）
@@ -100,6 +109,7 @@ function standingsPayload({ leaderboard = [], problem_ids = [], frozen, freeze_a
 module.exports = {
   buildProblemMap,
   buildUserProblemMap,
+  mergeBest,
   acceptedTotals,
   pickBestAttempts,
   compareByScore,

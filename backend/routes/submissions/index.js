@@ -10,6 +10,7 @@ const { parsePageLimit } = require('../../utils/pagination');
 const { checkExamWindow } = require('../../utils/examWindow');
 const { problemVisibilityError } = require('../../utils/visibility');
 const { visibilityDeniedMessage, canView } = require('../_visibility');
+const { isStaff } = require('../../utils/roles');
 const { checkExamTimeLimit, startAttempt, SUBMIT_GRACE_MS } = require('../../utils/examAttempts');
 const config = require('../../config/config');
 const repo = require('../../repositories/submissions');
@@ -88,6 +89,30 @@ router.get('/:id', requireAuth, (req, res) => {
     details,
     test_groups: testGroups,
     files: canViewCode ? files : (files.map(f => ({ filename: f.filename, content: '[HIDDEN]' })))
+  });
+});
+
+// AC 后公开代码：作者开启 public_code 后，任何登录用户可读取其通过代码（考试提交永久保密）
+router.get('/:id/code', requireAuth, (req, res) => {
+  const submission = repo.findCodeWithOwner(req.params.id);
+  if (!submission) {
+    return sendNotFound(res, 'Submission not found.');
+  }
+  if (submission.status !== 'accepted') {
+    return sendForbidden(res, 'Only accepted submissions expose public code.');
+  }
+  if (submission.exam_id) {
+    return sendForbidden(res, 'Exam submissions are private.');
+  }
+  const isOwner = submission.user_id === req.user.id;
+  if (!isOwner && !isStaff(req.user.role) && submission.public_code !== 1) {
+    return sendForbidden(res, 'The author has not shared this code.');
+  }
+  res.json({
+    id: submission.id,
+    language: submission.language,
+    source_code: submission.source_code,
+    files: repo.listFiles(submission.id)
   });
 });
 

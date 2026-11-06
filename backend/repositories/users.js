@@ -23,7 +23,7 @@ function getProfile(id) {
 }
 
 function getMe(id) {
-  return db.prepare('SELECT id, username, nickname, role, signature, bio, rating, preferred_language, submit_lock_exempt, hide_rating, hide_achievements, hide_dashboard, hide_favorites, created_at FROM users WHERE id = ?').get(id);
+  return db.prepare('SELECT id, username, nickname, role, signature, bio, rating, preferred_language, submit_lock_exempt, hide_rating, hide_achievements, hide_dashboard, hide_favorites, public_code, created_at FROM users WHERE id = ?').get(id);
 }
 
 function findEnabledLanguage(name) {
@@ -36,7 +36,7 @@ function updateMe(id, u) {
 }
 
 function getMeSettings(id) {
-  return db.prepare('SELECT id, username, nickname, role, signature, bio, rating, hide_rating, hide_achievements, hide_dashboard, hide_favorites, preferred_language FROM users WHERE id = ?').get(id);
+  return db.prepare('SELECT id, username, nickname, role, signature, bio, rating, hide_rating, hide_achievements, hide_dashboard, hide_favorites, public_code, preferred_language FROM users WHERE id = ?').get(id);
 }
 
 function get(id) {

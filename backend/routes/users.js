@@ -83,7 +83,7 @@ router.get('/me/virtual-contests', requireAuth, (req, res) => {
 });
 
 router.put('/me', requireAuth, (req, res) => {
-  const { nickname, signature, bio, hide_rating, hide_achievements, hide_dashboard, hide_favorites, preferred_language } = req.body;
+  const { nickname, signature, bio, hide_rating, hide_achievements, hide_dashboard, hide_favorites, public_code, preferred_language } = req.body;
   // 10.3: preferred_language 必须是已启用语言名之一，且限长，防止任意值/超长字符串入库
   if (preferred_language !== undefined && preferred_language !== null && preferred_language !== '') {
     const lang = String(preferred_language).slice(0, 32);
@@ -101,6 +101,7 @@ router.put('/me', requireAuth, (req, res) => {
     { key: 'hide_achievements', value: hide_achievements, transform: v => v ? 1 : 0 },
     { key: 'hide_dashboard', value: hide_dashboard, transform: v => v ? 1 : 0 },
     { key: 'hide_favorites', value: hide_favorites, transform: v => v ? 1 : 0 },
+    { key: 'public_code', value: public_code, transform: v => (v === 0 || v === false || v === '0') ? 0 : 1 },
     { key: 'preferred_language', value: req.body.preferred_language }
   ], { touchUpdatedAt: true });
   if (u.count === 0) {

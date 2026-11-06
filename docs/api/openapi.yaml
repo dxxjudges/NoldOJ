@@ -1,4 +1,4 @@
-﻿openapi: 3.0.3
+﻿﻿﻿﻿openapi: 3.0.3
 info:
   title: NoldOJ API
   description: |
@@ -476,6 +476,63 @@ components:
               kind:
                 type: string
                 enum: [custom, personal, all_users]
+
+    Notification:
+      type: object
+      description: 站内通知（评测结果、公告、回复、比赛邀请等）
+      properties:
+        id:
+          type: integer
+        user_id:
+          type: integer
+        type:
+          type: string
+          enum: [system, announcement, judge, reply, contest]
+        title:
+          type: string
+        content:
+          type: string
+        link:
+          type: string
+        is_read:
+          type: integer
+          description: 0=未读 / 1=已读
+        created_at:
+          type: string
+
+    ContestTeam:
+      type: object
+      description: 比赛队伍（仅 team_mode=1 的比赛可用）
+      properties:
+        id:
+          type: integer
+        contest_id:
+          type: integer
+        name:
+          type: string
+        invite_code:
+          type: string
+          description: 仅队员与教师及以上角色可见，其他查看者为 null
+          nullable: true
+        owner_id:
+          type: integer
+        member_count:
+          type: integer
+        max_team_size:
+          type: integer
+        is_owner:
+          type: boolean
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              user_id:
+                type: integer
+              username:
+                type: string
+              nickname:
+                type: string
 
   parameters:
     PageParam:
@@ -4803,4 +4860,619 @@ paths:
       responses:
         '302':
           description: 重定向
+
+  /problems/{id}/ac-submissions:
+    get:
+      tags: [题目]
+      summary: 题目通过代码列表
+      description: |
+        返回该题「最新一条 AC」的用户列表。仅包含作者开启 `public_code` 的非考试提交；
+        查看者本人的提交始终可见；匿名访问只返回已公开的代码。每人最多一条，按提交 id 倒序，上限 50 条。
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 通过代码列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  submissions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        user_id:
+                          type: integer
+                        username:
+                          type: string
+                        nickname:
+                          type: string
+                        language:
+                          type: string
+                        time_used:
+                          type: integer
+                        memory_used:
+                          type: integer
+                        created_at:
+                          type: string
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /submissions/{id}/code:
+    get:
+      tags: [提交]
+      summary: 读取通过代码
+      description: |
+        仅 `accepted` 且非考试提交可读。作者本人、教师及以上角色、或作者开启 `public_code` 时允许访问。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 代码内容
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  language:
+                    type: string
+                  source_code:
+                    type: string
+                  files:
+                    type: array
+                    items:
+                      type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /notifications:
+    get:
+      tags: [通知]
+      summary: 通知列表
+      description: 返回当前登录用户的通知（分页，按 id 倒序）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            maximum: 50
+        - name: unread
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [1]
+          description: 传 1 时只返回未读通知
+      responses:
+        '200':
+          description: 通知列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  size:
+                    type: integer
+                  unread:
+                    type: integer
+                  notifications:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/unread-count:
+    get:
+      tags: [通知]
+      summary: 未读数量
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 未读数
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unread:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/read-all:
+    put:
+      tags: [通知]
+      summary: 全部标记已读
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unread:
+                    type: integer
+                    example: 0
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/{id}/read:
+    put:
+      tags: [通知]
+      summary: 标记单条已读
+      description: 仅能操作本人通知；重复标记不报错。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 操作成功
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /notifications/{id}:
+    delete:
+      tags: [通知]
+      summary: 删除通知
+      description: 仅能删除本人通知。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 删除成功
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /notebook:
+    get:
+      tags: [错题本]
+      summary: 错题列表
+      description: |
+        错题 = 本人有非考试提交、但尚无 AC 的题目。已标记 `dismissed` 的题目不再返回。
+        结果附带人工标记状态与笔记。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            maximum: 50
+      responses:
+        '200':
+          description: 错题列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  size:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        problem_id:
+                          type: integer
+                        title:
+                          type: string
+                        difficulty:
+                          type: integer
+                        attempt_count:
+                          type: integer
+                        last_status:
+                          type: string
+                        mark_status:
+                          type: string
+                          nullable: true
+                        note:
+                          type: string
+                        updated_at:
+                          type: string
+                          nullable: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notebook/{problemId}:
+    put:
+      tags: [错题本]
+      summary: 标记/保存笔记
+      description: `status` 取 `mastered` 或 `dismissed`；`note` 最长 2000 字符。已存在的标记会被更新。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: problemId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [mastered, dismissed]
+                note:
+                  type: string
+      responses:
+        '200':
+          description: 标记已更新
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [错题本]
+      summary: 移出错题本
+      description: 以 `dismissed` 标记隐藏，避免该题因已有错提交而重新出现。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: problemId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 已移出
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /daily/today:
+    get:
+      tags: [每日一题]
+      summary: 今日题目与打卡状态
+      description: 按 UTC 日期确定性选题（同一天全站同一题），并返回本人是否已通过/已打卡与连续打卡天数。
+      security:
+        - {}
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 今日题目
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  day:
+                    type: string
+                    example: '2026-11-06'
+                  problem:
+                    type: object
+                    nullable: true
+                    properties:
+                      id:
+                        type: integer
+                      title:
+                        type: string
+                      difficulty:
+                        type: integer
+                      time_limit:
+                        type: integer
+                      memory_limit:
+                        type: integer
+                  solved:
+                    type: boolean
+                  checked_in:
+                    type: boolean
+                  streak:
+                    type: integer
+
+  /daily/checkin:
+    post:
+      tags: [每日一题]
+      summary: 打卡
+      description: 需先通过今日题目（存在当天非考试 AC 提交）才能打卡；重复打卡幂等。
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 打卡成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  checked_in:
+                    type: boolean
+                  day:
+                    type: string
+                  streak:
+                    type: integer
+        '400':
+          description: 尚未通过今日题目
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: integer
+                  reason:
+                    type: string
+                  message:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /contests/{id}/teams:
+    get:
+      tags: [比赛]
+      summary: 队伍列表
+      description: 仅 `team_mode=1` 的比赛返回队伍；邀请码只回给该队队员与教师及以上角色。
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 队伍列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team_mode:
+                    type: boolean
+                  max_team_size:
+                    type: integer
+                  teams:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ContestTeam'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [比赛]
+      summary: 创建队伍
+      description: 创建者自动成为队长与队员，并自动报名该比赛；同一比赛一人只能在一个队伍。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 40
+      responses:
+        '201':
+          description: 队伍已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContestTeam'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /contests/{id}/teams/join:
+    post:
+      tags: [比赛]
+      summary: 用邀请码加入队伍
+      description: 校验队伍属于该比赛、未满员（`max_team_size`）、本人尚未组队；成功后自动报名比赛。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invite_code]
+              properties:
+                invite_code:
+                  type: string
+      responses:
+        '200':
+          description: 已加入队伍
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContestTeam'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /contests/{id}/teams/mine:
+    get:
+      tags: [比赛]
+      summary: 我的队伍
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 我的队伍（未组队时 team 为 null）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team:
+                    allOf:
+                      - $ref: '#/components/schemas/ContestTeam'
+                    nullable: true
+                  max_team_size:
+                    type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [比赛]
+      summary: 退出/解散队伍
+      description: 队长退出则解散整队（成员一并移除），普通成员仅退出。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 已退出或已解散
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  dissolved:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /contests/{id}/teams/{tid}:
+    delete:
+      tags: [比赛]
+      summary: 解散队伍
+      description: 队长或教师及以上角色可解散。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: tid
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 已解散
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
 

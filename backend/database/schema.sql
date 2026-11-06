@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
   email_verified INTEGER DEFAULT 0,
   max_file_size INTEGER DEFAULT 0,
   max_storage INTEGER DEFAULT 0,
+  public_code INTEGER DEFAULT 1, -- AC 后是否公开自己的通过代码（0=私密）
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 );
@@ -165,6 +166,8 @@ CREATE TABLE IF NOT EXISTS contests (
   unfrozen_at TEXT,
   stats_public INTEGER DEFAULT 0, -- 统计公开开关：1=学生可查看聚合统计，0=仅教师可见
   is_hidden INTEGER DEFAULT 0,
+  team_mode INTEGER DEFAULT 0,     -- 组队模式：1=按队伍聚合排行榜
+  max_team_size INTEGER DEFAULT 3, -- 组队模式下每队最多人数
   visibility TEXT NOT NULL DEFAULT 'public' CHECK(visibility IN ('public','groups')), -- public=全体可见 / groups=仅绑定组成员可见
   created_by INTEGER,
   created_at TEXT DEFAULT (datetime('now')),
@@ -651,4 +654,73 @@ BEGIN
   INSERT OR IGNORE INTO user_groups (user_id, group_id, joined_at) SELECT NEW.id, id, datetime('now') FROM groups WHERE kind='personal' AND owner_id = NEW.id;
   INSERT OR IGNORE INTO user_groups (user_id, group_id, joined_at) SELECT NEW.id, id, datetime('now') FROM groups WHERE kind='all_users';
 END;
+
+-- ═══════════════════════════════════════════════════════
+-- 通知中心 / 错题本 / 每日一题 / 比赛组队
+-- ═══════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  type TEXT NOT NULL DEFAULT 'system',
+  title TEXT NOT NULL,
+  content TEXT DEFAULT '',
+  link TEXT DEFAULT '',
+  is_read INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read);
+
+CREATE TABLE IF NOT EXISTS notebook_marks (
+  user_id INTEGER NOT NULL,
+  problem_id INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'mastered' CHECK(status IN ('mastered','dismissed')),
+  note TEXT DEFAULT '',
+  updated_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, problem_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS daily_problems (
+  day TEXT PRIMARY KEY,
+  problem_id INTEGER NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS daily_checkins (
+  user_id INTEGER NOT NULL,
+  day TEXT NOT NULL,
+  problem_id INTEGER NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, day),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS contest_teams (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  contest_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  invite_code TEXT UNIQUE NOT NULL,
+  owner_id INTEGER NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (contest_id) REFERENCES contests(id) ON DELETE CASCADE,
+  FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE(contest_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS contest_team_members (
+  team_id INTEGER NOT NULL,
+  contest_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  joined_at TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (contest_id, user_id),
+  FOREIGN KEY (team_id) REFERENCES contest_teams(id) ON DELETE CASCADE,
+  FOREIGN KEY (contest_id) REFERENCES contests(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_contest_team_members_team ON contest_team_members(team_id);
 

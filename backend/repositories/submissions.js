@@ -184,7 +184,19 @@ function deleteSubmission(id) {
   db.prepare('DELETE FROM submissions WHERE id = ?').run(id);
 }
 
+// 「AC 后公开代码」：附带作者公开开关，路由层据此做授权判定
+function findCodeWithOwner(id) {
+  return db.prepare(`
+    SELECT s.id, s.user_id, s.problem_id, s.status, s.exam_id, s.source_code, s.language,
+           u.public_code
+    FROM submissions s
+    LEFT JOIN users u ON u.id = s.user_id
+    WHERE s.id = ?
+  `).get(id);
+}
+
 module.exports = {
+  findCodeWithOwner,
   countList,
   listPage,
   findByIdWithProblem,

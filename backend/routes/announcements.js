@@ -65,6 +65,18 @@ router.post('/', requireAuth, requireRole('teacher'), (req, res) => {
   // 广播新公告给所有在线用户
   if (ann.type === 'global') {
     emitAnnouncement(ann);
+    // 通知中心：全体用户各生成一条站内信（批量 INSERT，不发考试/比赛公告）
+    try {
+      const { notifyAllUsers } = require('../services/notifications');
+      notifyAllUsers({
+        type: 'announcement',
+        title: `新公告：${ann.title}`,
+        content: String(ann.content || '').slice(0, 200),
+        link: `/pages/announcement.html?id=${ann.id}`
+      });
+    } catch {
+      // 通知写入失败不影响公告发布
+    }
   }
   res.status(201).json(ann);
 });

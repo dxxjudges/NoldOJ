@@ -1280,6 +1280,8 @@ async function banUser(id) { try { await apiCall('POST', `/users/${id}/ban`); lo
           end_time: localInputToIso(document.getElementById('cEnd').value),
           freeze_minutes: parseInt(document.getElementById('cFreeze').value) || 0,
           stats_public: document.getElementById('cStats').checked,
+          team_mode: document.getElementById('cTeamMode').checked,
+          max_team_size: parseInt(document.getElementById('cMaxTeamSize').value) || 3,
         });
         hideCreateContest();
         loadContests();

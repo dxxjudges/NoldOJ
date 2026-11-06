@@ -1,4 +1,4 @@
-﻿# NoldOJ - Windows 在线评测系统
+﻿﻿﻿﻿# NoldOJ - Windows 在线评测系统
 
 > ⚠️ **安全警告与免责声明**
 >
@@ -476,6 +476,16 @@ NoldOJ/
 | **超级管理员** | 最高权限 | 所有权限 + 修改角色、重置密码、免密登录、管理语言、设置 Rating、自删除、设置图床限额 |
 
 ## 更新日志
+
+### 新增：通知中心 / 错题本 / 每日一题 / AC 公开代码 / 比赛组队
+- **通知中心**：新增 `notifications` 表与 `/notifications` 系列接口（列表/未读数/单条已读/全部已读/删除）。判题结束（考试提交除外）、讨论被回复、全局公告发布、比赛邀请都会写入站内通知，并通过 Socket.IO（房间 `user:<id>`，事件 `notification`）实时推送；导航栏新增通知铃铛与未读角标
+- **错题本**：新增 `/notebook` 接口。错题由提交记录自动派生（本人有非考试提交且尚无 AC），`notebook_marks` 只保存人工状态（`mastered` / `dismissed`）与笔记；「移出」写 `dismissed` 而不是删标记，避免该题因已有错提交反复出现；新增 `/pages/notebook.html`
+- **每日一题 + 打卡**：`GET /daily/today` 按 UTC 日期对公开非考试题目做确定性哈希选题（同一天全站同一题），`POST /daily/checkin` 需当天已有非考试 AC 才允许打卡；新增 `daily_problems`、`daily_checkins` 两表，首页新增每日一题卡片（题目、通过/打卡状态、连续天数）
+- **AC 后公开代码**：`users.public_code`（默认开启）与个人资料开关；`GET /problems/:id/ac-submissions` 返回每题最新 AC（排除考试提交，仅作者公开或查看者本人），`GET /submissions/:id/code` 做二次授权（本人/教师及以上/作者公开）；题目页新增「通过代码」区块
+- **比赛组队**：`contests` 新增 `team_mode`、`max_team_size`；新增 `contest_teams`、`contest_team_members` 两表与建队/邀请码加入/我的队伍/队伍列表/退出解散接口；排行榜在组队模式下按队伍聚合（队员逐题取最优，未组队者仍以个人身份入榜）；比赛页新增「队伍」标签页，管理台比赛表单新增组队开关与人数上限
+- **数据库**：以上新表/新列均在 `database/schema.sql` 与 `db.js` 启动迁移中同步，旧库可直接升级
+- **AI 提示比赛禁用**：`POST /problems/:id/hint` 在比赛/虚拟比赛进行中对参赛者直接返回 403（比赛结束后自动恢复）；题目页从比赛入口进入且比赛进行中时不再显示 AI 提示按钮
+- **测试**：新增 `test/notifications.test.js`、`test/notebook-daily.test.js`、`test/public-code.test.js`、`test/contest-teams.test.js`、`test/ai-hint.test.js` 共 34 项；`npm test` 316 项通过
 
 ### 新增：试卷「问卷」模式（可匿名）
 - **问卷开关**：试卷新增 `is_survey`；开启后**不判分、禁用排行榜**（创建/更新/仓库层三重兜底把 `leaderboard_enabled` 归零，`GET /exams/:id/leaderboard` 直接 404），学生端隐藏分数/及格分与排行榜入口，改显示「📋 问卷」「🕵️ 匿名」徽标与不判分提示

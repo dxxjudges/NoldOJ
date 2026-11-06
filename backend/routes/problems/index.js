@@ -8,6 +8,7 @@ const list = require('./list');
 const crud = require('./crud');
 const testdata = require('./testdata');
 const solutions = require('./solutions');
+const acCode = require('./ac-code');
 const extras = require('./extras');
 
 const router = express.Router();
@@ -25,6 +26,7 @@ router.use(list);
 router.use(crud);
 router.use(testdata);
 router.use(solutions);
+router.use(acCode);
 router.use(extras);
 
 module.exports = router;

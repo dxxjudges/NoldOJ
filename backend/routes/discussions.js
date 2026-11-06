@@ -166,11 +166,13 @@ router.post('/:id/replies', requireAuth, (req, res) => {
   }
   // 限制最多两层楼中楼
   let parentId = null;
+  let parentRow = null;
   if (parent_id) {
     const parent = discussionsRepo.getParentReply(parent_id, disc.id);
     if (!parent) {
       return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'Parent reply not found.' });
     }
+    parentRow = parent;
     if (parent.parent_id) {
       // 二级回复的回复，挂在原一级回复下
       parentId = parent.parent_id;
@@ -182,6 +184,21 @@ router.post('/:id/replies', requireAuth, (req, res) => {
     disc.id, parentId, sanitizeText(content).trim(), req.user.id
   );
   const reply = discussionsRepo.getReplyWithAuthor(result.lastInsertRowid);
+
+  // 通知中心：通知被回复者（楼主/父回复作者），不给自己发
+  try {
+    const { notifyUser } = require('../services/notifications');
+    const link = `/pages/discussion.html?id=${disc.id}`;
+    const snippet = String(reply.content || '').slice(0, 120);
+    if (parentRow && parentRow.author_id !== req.user.id) {
+      notifyUser(parentRow.author_id, { type: 'reply', title: `有人在讨论「${disc.title}」中回复了你`, content: snippet, link });
+    }
+    if (disc.author_id !== req.user.id && (!parentRow || disc.author_id !== parentRow.author_id)) {
+      notifyUser(disc.author_id, { type: 'reply', title: `「${disc.title}」有新回复`, content: snippet, link });
+    }
+  } catch {
+    // 通知失败不影响回复发布
+  }
   res.status(201).json(reply);
 });
 

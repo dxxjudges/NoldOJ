@@ -1,4 +1,4 @@
-﻿const db = require('../../database/db');
+﻿﻿﻿﻿const db = require('../../database/db');
 const { emitJudgeStatus, emitContestRanking } = require('../socket');
 const { checkAchievements } = require('../achievements');
 const examProgram = require('../examProgram');
@@ -73,6 +73,29 @@ async function judgeSubmission(submissionId) {
       }
       // 考试提交完全隔离：不计成就、不发 Rating、不进比赛榜单与题单进度
       return;
+    }
+
+    // 通知中心：非考试提交的最终结果推送给本人（考试结果不进个人通知，避免泄露试题）
+    try {
+      const { notifyUser } = require('../notifications');
+      const STATUS_LABEL = {
+        accepted: '通过',
+        wrong_answer: '答案错误',
+        time_limit_exceeded: '时间超限',
+        memory_limit_exceeded: '内存超限',
+        runtime_error: '运行错误',
+        compile_error: '编译错误',
+        system_error: '系统错误',
+        skipped: '跳过'
+      };
+      notifyUser(submission.user_id, {
+        type: 'judge',
+        title: `${updated.status === 'accepted' ? '题目通过' : '评测完成'}：${problem.title}`,
+        content: `提交 #${submissionId} 结果：${STATUS_LABEL[updated.status] || updated.status}`,
+        link: `/pages/submission.html?id=${submissionId}`
+      });
+    } catch (e) {
+      logWarn('JUDGE', `通知推送失败 (submission ${submissionId}): ${e && e.message}`);
     }
 
     // 成就检查（每次评测结束触发，含非 AC，用于连续做题天数的累计）

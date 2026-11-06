@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>通知中心 - NoldOJ</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <script src="/js/tailwind.js"></script>
+  <script>tailwind.config={darkMode:'class'}</script>
+  <script src="/js/api.js"></script>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
+  <div id="nav"></div>
+  <div class="max-w-4xl mx-auto px-4 py-8">
+    <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+      <h1 class="text-3xl font-bold text-gray-900 dark:text-white">🔔 通知中心</h1>
+      <div class="flex items-center space-x-3">
+        <label class="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
+          <input id="unreadOnly" type="checkbox" onchange="reload(1)">
+          <span>只看未读</span>
+        </label>
+        <button onclick="markAllRead()" class="px-3 py-1.5 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">全部已读</button>
+      </div>
+    </div>
+    <div id="countBadge" class="text-sm text-gray-500 dark:text-gray-400 mb-3" aria-live="polite"></div>
+    <div id="list" class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm dark:shadow-gray-900/30 border border-gray-100 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-700"></div>
+    <div id="pager" class="mt-6 flex justify-center gap-2 flex-wrap"></div>
+  </div>
+  <script>
+    document.getElementById('nav').innerHTML = renderNav('notifications');
+    requireAuth();
+    let page = 1;
+    const TYPE_LABEL = { system: '系统', announcement: '公告', judge: '评测', reply: '回复', contest: '比赛' };
+
+    async function reload(p) {
+      page = p || page;
+      try {
+        const unread = document.getElementById('unreadOnly').checked ? '&unread=1' : '';
+        const data = await apiCall('GET', `/notifications?page=${page}&size=20${unread}`);
+        updateNotifBadge(data.unread);
+        document.getElementById('countBadge').textContent = `共 ${data.total} 条，未读 ${data.unread} 条`;
+        const list = document.getElementById('list');
+        if (!data.notifications || data.notifications.length === 0) {
+          list.innerHTML = '<div class="text-center text-gray-400 dark:text-gray-500 py-16">暂无通知</div>';
+          document.getElementById('pager').innerHTML = '';
+          return;
+        }
+        list.innerHTML = data.notifications.map(n => `
+          <div class="flex items-start justify-between gap-4 px-5 py-4 ${n.is_read ? '' : 'bg-indigo-50/40 dark:bg-indigo-900/10'}">
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="px-1.5 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">${TYPE_LABEL[n.type] || escapeHtml(n.type)}</span>
+                ${n.is_read ? '' : '<span class="w-2 h-2 rounded-full bg-indigo-500 inline-block" aria-label="未读"></span>'}
+                <a href="${escapeHtml(n.link || '#')}" onclick="markRead(${n.id})" class="font-semibold text-gray-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 truncate">${escapeHtml(n.title)}</a>
+              </div>
+              ${n.content ? `<div class="text-sm text-gray-600 dark:text-gray-400 mt-1 whitespace-pre-line">${escapeHtml(n.content)}</div>` : ''}
+              <div class="text-xs text-gray-400 dark:text-gray-500 mt-1">${new Date(n.created_at).toLocaleString()}</div>
+            </div>
+            <div class="flex flex-col items-end space-y-1 flex-shrink-0">
+              ${n.is_read ? '' : `<button onclick="markRead(${n.id})" class="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">标记已读</button>`}
+              <button onclick="removeOne(${n.id})" class="text-xs text-gray-400 hover:text-red-600 dark:hover:text-red-400">删除</button>
+            </div>
+          </div>
+        `).join('');
+        const totalPages = Math.ceil(data.total / 20) || 1;
+        let ph = '';
+        for (let i = 1; i <= totalPages; i++) {
+          ph += `<button onclick="reload(${i})" class="px-3 py-1 text-sm rounded-lg ${i===page?'bg-indigo-600 text-white':'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700'}">${i}</button>`;
+        }
+        document.getElementById('pager').innerHTML = ph;
+      } catch (err) {
+        document.getElementById('list').innerHTML = `<p class="text-center text-red-500 py-16">${escapeHtml(err.message) || '加载失败'}</p>`;
+      }
+    }
+
+    async function markRead(id) {
+      try {
+        await apiCall('PUT', `/notifications/${id}/read`);
+        reload();
+      } catch (err) {
+        showToast(err.message || '操作失败', 'error');
+      }
+    }
+
+    async function markAllRead() {
+      try {
+        await apiCall('PUT', '/notifications/read-all');
+        updateNotifBadge(0);
+        reload();
+      } catch (err) {
+        showToast(err.message || '操作失败', 'error');
+      }
+    }
+
+    async function removeOne(id) {
+      try {
+        await apiCall('DELETE', `/notifications/${id}`);
+        reload();
+      } catch (err) {
+        showToast(err.message || '操作失败', 'error');
+      }
+    }
+
+    reload(1);
+  </script>
+</body>
+</html>

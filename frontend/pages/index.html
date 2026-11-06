@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+﻿﻿﻿﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -50,6 +50,10 @@
       <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm dark:shadow-gray-900/30" id="stat-users"><div class="text-3xl font-bold text-purple-600 dark:text-purple-400">-</div><div class="text-gray-500 dark:text-gray-400 dark:text-gray-500 mt-1">用户</div></div>
       <div class="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm dark:shadow-gray-900/30" id="stat-languages"><div class="text-3xl font-bold text-orange-600 dark:text-orange-400">-</div><div class="text-gray-500 dark:text-gray-400 dark:text-gray-500 mt-1">语言</div></div>
     </div>
+    <div class="mt-16 bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl p-6 text-white" id="dailyCard">
+      <div class="text-sm opacity-80">每日一题</div>
+      <div class="mt-2 text-xl font-bold">加载中…</div>
+    </div>
     <div class="mt-16">
       <div class="flex items-center justify-between mb-6">
         <h2 class="text-2xl font-bold text-gray-900 dark:text-white">推荐题单</h2>
@@ -70,6 +74,43 @@
       } catch {}
     }
     loadStats();
+    async function loadDaily() {
+      const card = document.getElementById('dailyCard');
+      try {
+        const d = await apiCall('GET', '/daily/today');
+        if (!d || !d.problem) {
+          card.innerHTML = '<div class="text-sm opacity-80">每日一题</div><div class="mt-2 text-lg">今日暂无题目</div>';
+          return;
+        }
+        const DIFF = ['入门', '简单', '中等', '较难', '困难', '极难'];
+        const p = d.problem;
+        card.innerHTML = `
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <div class="text-sm opacity-80">每日一题 · ${d.day}</div>
+              <a href="/pages/problem.html?id=${p.id}" class="mt-2 block text-xl font-bold hover:underline">#${p.id} ${escapeHtml(p.title)}</a>
+              <div class="text-sm opacity-80 mt-1">难度：${DIFF[p.difficulty] || p.difficulty} · 时限 ${p.time_limit}ms · 内存 ${p.memory_limit}MB</div>
+            </div>
+            <div class="text-right">
+              <div class="text-sm">${d.checked_in ? '已打卡' : (d.solved ? '已通过，待打卡' : '尚未通过')}</div>
+              <div class="text-2xl font-bold mt-1">连续 ${d.streak} 天</div>
+              ${d.solved && !d.checked_in ? `<button onclick="checkinDaily()" class="mt-2 px-4 py-2 bg-white text-indigo-700 rounded-xl text-sm font-semibold hover:bg-indigo-50">立即打卡</button>` : ''}
+            </div>
+          </div>`;
+      } catch {
+        card.innerHTML = '<div class="text-sm opacity-80">每日一题</div><div class="mt-2 text-lg">加载失败</div>';
+      }
+    }
+    async function checkinDaily() {
+      try {
+        const r = await apiCall('POST', '/daily/checkin');
+        showToast(`打卡成功，连续 ${r.streak} 天`, 'success');
+        loadDaily();
+      } catch (err) {
+        showToast(err.message || '打卡失败', 'error');
+      }
+    }
+    loadDaily();
     async function loadRecommendSets() {
       try {
         const data = await apiCall('GET', '/problem-sets?page=1&size=3');

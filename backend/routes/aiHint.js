@@ -52,6 +52,15 @@ router.post('/:id/hint', requireAuth, async (req, res) => {
     return sendForbidden(res, visibilityDeniedMessage('problem'));
   }
 
+  // 比赛/虚拟比赛进行中一律禁用 AI 提示（公平性）：放在门槛之前，避免用户只为拿提示反复提交
+  const activeContest = aiHintRepo.findActiveContest(req.user.id, problemId);
+  if (activeContest) {
+    return res.status(403).json({
+      code: 6, reason: 'ERR_FORBIDDEN',
+      message: `比赛「${activeContest.title}」进行中，AI 思路提示已禁用（结束时间 ${activeContest.end_time}）。`
+    });
+  }
+
   // 门槛：至少 2 次未 AC 的提交才能要提示
   const fails = aiHintRepo.countFailedAttempts(req.user.id, problemId);
   if (fails < 2) {

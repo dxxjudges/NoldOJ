@@ -523,8 +523,24 @@ function linkProblemCategory(problemId, categoryId) {
   db.prepare('INSERT OR IGNORE INTO problem_categories (problem_id, category_id) VALUES (?, ?)').run(problemId, categoryId);
 }
 
+// 「通过代码」列表：每人取最新一条 AC（排除考试提交，且仅当作者开启公开或查看者本人）
+function listAcceptedSubmissions(problemId, viewerId) {
+  return db.prepare(`
+    SELECT s.id, s.user_id, u.username, u.nickname, s.language, s.time_used, s.memory_used, s.created_at
+    FROM submissions s
+    JOIN users u ON u.id = s.user_id
+    WHERE s.problem_id = ? AND s.status = 'accepted' AND s.exam_id IS NULL
+      AND (u.public_code = 1 OR s.user_id = ?)
+      AND s.id = (SELECT MAX(s2.id) FROM submissions s2
+                  WHERE s2.user_id = s.user_id AND s2.problem_id = s.problem_id
+                    AND s2.status = 'accepted' AND s2.exam_id IS NULL)
+    ORDER BY s.id DESC LIMIT 50
+  `).all(problemId, viewerId || -1);
+}
+
 module.exports = {
   EXAM_PROBLEM_ID_BASE,
+  listAcceptedSubmissions,
   getProblemById,
   getProblemId,
   countTestCases,
