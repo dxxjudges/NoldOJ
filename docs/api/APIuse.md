@@ -683,6 +683,10 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 - **非参赛者 / 未登录**：仅返回冻结状态，`leaderboard` 为空数组，不泄露排名
 - 排行榜冻结时只统计冻结时刻之前的提交
 
+### GET /contests/:id/export.csv — 导出排行榜 CSV
+
+可选认证。教师/管理员可导出全员（默认，`?scope=all`）；参赛者只能导出自己在榜的一行（`scope=mine`），非参赛者 403。数据与 `GET /contests/:id/leaderboard` 完全同源（同一封榜/时间窗口径）。列：排名、用户/队伍、类型、成员、总分、总用时(ms)、各题（`AC 分数 (用时)` 或 `未通过`）。响应为 `text/csv; charset=utf-8`，带 UTF-8 BOM 与 `Content-Disposition` 下载头。
+
 ### GET /contests/:id/stats — 比赛数据统计
 
 可选认证。教师/管理员始终可看；`stats_public=1` 时学生也可看（否则 403「统计未公开，仅教师可见。」）。与排行榜同口径：仅统计参赛者、比赛时间窗内的已判定提交，封榜时截断到冻结时刻；非 staff 不返回隐藏题。仅输出聚合数据（参赛人数、有提交人数、提交/AC 数、全通过人数、人均通过题数，以及逐题提交数/尝试人数/AC 人数/通过率），不含个人成绩明细。
@@ -1066,6 +1070,36 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 
 ---
 
+## 10.16 私信模块 `/messages`
+
+一对一私信，需认证。文本上限 2000 字符；发送接口限流 30 条/分钟。
+
+### GET /messages — 会话列表
+
+`?page&size`（默认 20，上限 100）。返回 `{ total, page, size, unread, conversations }`；每个会话含 `peer`（`id`/`username`/`nickname`/`role`）、`last_message`（`id`/`content`/`sender_id`/`is_read`/`created_at`）与该对端 `unread`。
+
+### GET /messages/unread-count — 未读总数
+
+返回 `{ unread }`，供导航信封角标使用。
+
+### GET /messages/:username — 与某用户的历史消息
+
+`?limit`（默认 30，上限 100）与 `?before_id`（向上翻页，只取更早的消息）。返回 `{ peer, messages, unread }`；`messages` 按 id 升序，读取本身不改变已读状态。
+
+### POST /messages — 发送私信
+
+请求体：`{ "to": "用户名", "content": "..." }`（也可用 `receiver_id`）。成功返回 201 与完整消息行；不能给自己发信（400），对封禁用户发信返回 403，接收者不存在返回 404。发送后通过 Socket.IO `message` 事件实时推送给双方。
+
+### PUT /messages/:username/read — 标记会话已读
+
+将本人接收的该会话消息全部置为已读，返回新的 `unread` 总数。
+
+### DELETE /messages/:id — 删除单条消息
+
+仅移除本人一侧（发送方/接收方各自软删），双方都删后物理清理；非本人消息返回 404。
+
+---
+
 ## 11. 讨论模块 `/discussions`
 
 ### GET /discussions/:id — 讨论详情
@@ -1161,6 +1195,15 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 可选认证。教师/管理员始终可看；`stats_public=1` 时学生也可看（否则 403「统计未公开，仅教师可见。」）。门禁与排行榜一致：隐藏/私有试卷、用户组不可见均拒绝；封榜期只统计冻结时刻前的交卷。聚合返回参与人数、交卷次数、评分状态分布、平均/中位/最高/最低分、满分与及格人数、按满分百分比 11 档的分数分布，以及逐题作答人数/均分/满分人数/正确率/待批改数；每人取最佳一次尝试，不含个人成绩明细。
 
 问卷返回独立结构：`{ is_survey: true, is_anonymous, summary: { participants }, questions: [...] }`，无分数相关字段；`participants` 为已提交人数，每题给 `answered`（作答人数）与 `distribution`（选择题按选项、判断题按正确/错误计数），填空/大题只给作答人数、不下发原文。
+
+### GET /exams/:id/export.csv — 导出成绩单 CSV
+
+可选认证。门禁与统计/排行榜一致（隐藏/私有试卷、用户组不可见均拒绝）。
+
+- `scope=all`（仅教师及以上）：全员成绩总表，列：排名、用户名、昵称、总分、满分、状态、尝试次数、交卷时间。学生请求 `scope=all` 返回 403。
+- `scope=mine`（学生默认）：本人最佳一次尝试的成绩单，含汇总行与逐题明细（序号、题目、题型、满分、得分、是否正确、批改状态）；未交卷返回 404。教师显式传 `scope=mine` 也可导出本人成绩单。
+
+问卷（`is_survey=1`）没有成绩单，返回 404。响应为 `text/csv; charset=utf-8`，带 UTF-8 BOM 与 `Content-Disposition` 下载头。
 
 ## 11.6 系统状态 `/system`
 
@@ -1296,6 +1339,7 @@ fi
 | 文章编辑 | `/pages/article-edit.html` | 发布/编辑文章 |
 | 个人资料 | `/pages/profile.html?id=X` | 签名、简介、偏好语言、隐私开关编辑、成就/看板/收藏入口 |
 | Rating 排行 | `/pages/rating.html` | Rating 排行榜 |
+| 私信 | `/pages/messages.html?user=用户名` | 会话列表、历史消息、实时收发（导航信封角标） |
 | 成就 | `/pages/achievements.html?user_id=X` | 我的/TA 的成就（user_id 缺省为本人） |
 | 数据看板 | `/pages/dashboard.html?user_id=X` | 我的/TA 的数据看板（user_id 缺省为本人） |
 | 我的收藏 | `/pages/favorites.html?user_id=X` | 我的/TA 的收藏（user_id 缺省为本人，他人视图无取消收藏） |

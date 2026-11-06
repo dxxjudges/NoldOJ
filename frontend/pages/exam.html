@@ -470,6 +470,9 @@
             <a href="/pages/exam-grading.html?id=${currentExam.id}&sid=${submission.id}" class="text-indigo-600 dark:text-indigo-400 hover:underline">查看详细答案 →</a>
           </div>
           ` : ''}
+          <div class="mt-4">
+            <button onclick="exportExamCsv()" class="text-indigo-600 dark:text-indigo-400 hover:underline">⬇ 导出我的成绩单 (CSV)</button>
+          </div>
           ${currentExam.leaderboard_enabled !== 0 ? `
           <div class="mt-4">
             <a href="/pages/exam-leaderboard.html?id=${currentExam.id}" class="text-indigo-600 dark:text-indigo-400 hover:underline">🏆 查看排行榜 →</a>
@@ -482,6 +485,16 @@
           ` : ''}
         </div>
       `;
+    }
+
+    // 导出本人成绩单（含逐题明细；后端强制 scope=mine 校验）
+    async function exportExamCsv() {
+      if (!currentExam) return;
+      try {
+        await downloadCsv(`/exams/${currentExam.id}/export.csv?scope=mine`, '我的成绩单.csv');
+      } catch (e) {
+        showToast((e && e.message) || '导出失败', 'error');
+      }
     }
 
     // 问卷提交完成页：不展示分数/答案/排行榜；匿名问卷不显示提交时刻（与后端口径一致）

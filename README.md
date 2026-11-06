@@ -477,6 +477,11 @@ NoldOJ/
 
 ## 更新日志
 
+### 新增：私信 / CSV 成绩单导出
+- **私信**：新增 `messages` 表与 `/messages` 系列接口（会话列表/历史/发送/已读/删除/未读数）。一对一私信按发送方、接收方分别软删，双方都删后物理清理；发送接口 2000 字上限、30 条/分钟限流，拒绝给自己发信与向封禁用户发信；发送后通过 Socket.IO `message` 事件实时推送给双方，导航栏新增信封入口与未读角标，个人资料页新增「发私信」按钮，新增 `/pages/messages.html`
+- **CSV 成绩单导出**：新增 `utils/csv.js`（转义、UTF-8 BOM、`Content-Disposition` 中文文件名）。`GET /exams/:id/export.csv` 支持教师导出全员成绩总表（`scope=all`）与学生导出本人成绩单（`scope=mine`，含逐题明细）；`GET /contests/:id/export.csv` 支持教师导出全员排行榜、参赛者导出自己在榜的一行（与排行榜同口径，含封榜截断）。排行榜页、试卷结果页、比赛页均新增导出按钮
+- **测试**：新增 `test/messages.test.js`、`test/csv-export.test.js` 共 16 项；`npm test` 332 项通过
+
 ### 新增：通知中心 / 错题本 / 每日一题 / AC 公开代码 / 比赛组队
 - **通知中心**：新增 `notifications` 表与 `/notifications` 系列接口（列表/未读数/单条已读/全部已读/删除）。判题结束（考试提交除外）、讨论被回复、全局公告发布、比赛邀请都会写入站内通知，并通过 Socket.IO（房间 `user:<id>`，事件 `notification`）实时推送；导航栏新增通知铃铛与未读角标
 - **错题本**：新增 `/notebook` 接口。错题由提交记录自动派生（本人有非考试提交且尚无 AC），`notebook_marks` 只保存人工状态（`mastered` / `dismissed`）与笔记；「移出」写 `dismissed` 而不是删标记，避免该题因已有错提交反复出现；新增 `/pages/notebook.html`

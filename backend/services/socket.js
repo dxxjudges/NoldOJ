@@ -128,6 +128,15 @@ function emitNotification(userId, notification) {
   });
 }
 
+// 推送私信（接收者与发送者的其它在线标签页都会收到，前端按 id 去重）
+function emitMessage(userId, message) {
+  if (!io) return;
+  io.to(`user:${userId}`).emit('message', {
+    type: 'message',
+    data: message
+  });
+}
+
 // 广播新公告
 function emitAnnouncement(announcement) {
   if (!io) return;
@@ -137,4 +146,4 @@ function emitAnnouncement(announcement) {
   });
 }
 
-module.exports = { initSocket, emitJudgeStatus, emitContestRanking, emitNotification, emitAnnouncement };
+module.exports = { initSocket, emitJudgeStatus, emitContestRanking, emitNotification, emitMessage, emitAnnouncement };

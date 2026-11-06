@@ -233,7 +233,7 @@ function hasUserSubmission(examId, userId) {
 // 封榜时只统计封榜时刻前的交卷；教师/管理员不入榜
 function getLeaderboardRows(examId, freezeAt) {
   let sql = `
-    SELECT es.user_id, es.total_score, es.max_score, es.submitted_at, es.status, u.username, u.nickname,
+    SELECT es.id, es.user_id, es.total_score, es.max_score, es.submitted_at, es.status, u.username, u.nickname,
       (SELECT COUNT(*) FROM exam_submissions x WHERE x.exam_id = es.exam_id AND x.user_id = es.user_id) as attempts
     FROM exam_submissions es JOIN users u ON u.id = es.user_id
     WHERE es.exam_id = ? AND u.role = 'user'`;

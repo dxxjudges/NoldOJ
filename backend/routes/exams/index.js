@@ -7,6 +7,7 @@ const { makeVisibilityRouter } = require('../_visibility');
 const crud = require('./crud');
 const leaderboard = require('./leaderboard');
 const stats = require('./stats');
+const exportRoutes = require('./export');
 const submissions = require('./submissions');
 const grading = require('./grading');
 
@@ -24,6 +25,7 @@ router.use(makeVisibilityRouter({
 router.use(crud);
 router.use(leaderboard);
 router.use(stats);
+router.use(exportRoutes);
 router.use(submissions);
 router.use(grading);
 

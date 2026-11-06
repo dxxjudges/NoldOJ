@@ -534,6 +534,65 @@ components:
               nickname:
                 type: string
 
+    PrivateMessage:
+      type: object
+      description: 一对一私信
+      properties:
+        id:
+          type: integer
+        sender_id:
+          type: integer
+        receiver_id:
+          type: integer
+        content:
+          type: string
+        is_read:
+          type: integer
+          description: 0 未读 / 1 已读
+        created_at:
+          type: string
+        sender_username:
+          type: string
+        sender_nickname:
+          type: string
+        receiver_username:
+          type: string
+        receiver_nickname:
+          type: string
+
+    Conversation:
+      type: object
+      description: 私信会话摘要
+      properties:
+        peer:
+          type: object
+          properties:
+            id:
+              type: integer
+            username:
+              type: string
+            nickname:
+              type: string
+            role:
+              type: string
+        last_message:
+          type: object
+          properties:
+            id:
+              type: integer
+            sender_id:
+              type: integer
+            receiver_id:
+              type: integer
+            content:
+              type: string
+            is_read:
+              type: integer
+            created_at:
+              type: string
+        unread:
+          type: integer
+
   parameters:
     PageParam:
       name: page
@@ -5149,7 +5208,7 @@ paths:
     put:
       tags: [错题本]
       summary: 标记/保存笔记
-      description: `status` 取 `mastered` 或 `dismissed`；`note` 最长 2000 字符。已存在的标记会被更新。
+      description: "`status` 取 `mastered` 或 `dismissed`；`note` 最长 2000 字符。已存在的标记会被更新。"
       security:
         - bearerAuth: []
       parameters:
@@ -5470,6 +5529,224 @@ paths:
           description: 已解散
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /messages:
+    get:
+      tags: [私信]
+      summary: 会话列表
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: size
+          in: query
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        '200':
+          description: 会话列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  page: { type: integer }
+                  size: { type: integer }
+                  unread: { type: integer }
+                  conversations:
+                    type: array
+                    items: { $ref: '#/components/schemas/Conversation' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [私信]
+      summary: 发送私信
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                to: { type: string, description: 接收者用户名 }
+                receiver_id: { type: integer }
+                content: { type: string, maxLength: 2000 }
+      responses:
+        '201':
+          description: 已发送
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  data: { $ref: '#/components/schemas/PrivateMessage' }
+        '400':
+          description: 内容为空/超长/给自己发信
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /messages/unread-count:
+    get:
+      tags: [私信]
+      summary: 未读私信总数
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 未读数量
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unread: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /messages/{username}:
+    get:
+      tags: [私信]
+      summary: 与某用户的历史消息
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 30, maximum: 100 }
+        - name: before_id
+          in: query
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 历史消息（按 id 升序）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  peer:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      username: { type: string }
+                      nickname: { type: string }
+                  messages:
+                    type: array
+                    items: { $ref: '#/components/schemas/PrivateMessage' }
+                  unread: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /messages/{username}/read:
+    put:
+      tags: [私信]
+      summary: 标记会话已读
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 已读
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  unread: { type: integer }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /messages/{id}:
+    delete:
+      tags: [私信]
+      summary: 删除单条消息（仅本人一侧）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: 已删除
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /exams/{id}/export.csv:
+    get:
+      tags: [试卷]
+      summary: 导出成绩单 CSV
+      description: 教师可用 scope=all 导出全员成绩总表；学生默认 scope=mine 导出本人成绩单（含逐题明细）；问卷无成绩单返回 404。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: scope
+          in: query
+          schema: { type: string, enum: [all, mine] }
+      responses:
+        '200':
+          description: CSV 文件
+          content:
+            text/csv:
+              schema: { type: string }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /contests/{id}/export.csv:
+    get:
+      tags: [比赛]
+      summary: 导出排行榜 CSV
+      description: 教师可导出全员；参赛者只能导出自己在榜的一行（scope=mine）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: scope
+          in: query
+          schema: { type: string, enum: [all, mine] }
+      responses:
+        '200':
+          description: CSV 文件
+          content:
+            text/csv:
+              schema: { type: string }
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':

@@ -206,6 +206,7 @@ async function main() {
   const notificationRoutes = require('../routes/notifications');
   const notebookRoutes = require('../routes/notebook');
   const dailyRoutes = require('../routes/daily');
+  const messageRoutes = require('../routes/messages');
 
   app.use('/api/v1/auth', authRoutes);
   app.use('/api/v1/problems', problemRoutes);
@@ -233,6 +234,7 @@ async function main() {
   app.use('/api/v1/notifications', notificationRoutes);
   app.use('/api/v1/notebook', notebookRoutes);
   app.use('/api/v1/daily', dailyRoutes);
+  app.use('/api/v1/messages', messageRoutes);
 
   const routeList = [
     ['/api/v1/auth', '认证'],
@@ -259,6 +261,7 @@ async function main() {
     ['/api/v1/notifications', '通知中心'],
     ['/api/v1/notebook', '错题本'],
     ['/api/v1/daily', '每日一题'],
+    ['/api/v1/messages', '私信'],
   ];
   logInfo('ROUTER', `Registered ${routeList.length} route groups:`);
   for (const [path, name] of routeList) {

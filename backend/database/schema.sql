@@ -724,3 +724,18 @@ CREATE TABLE IF NOT EXISTS contest_team_members (
 );
 CREATE INDEX IF NOT EXISTS idx_contest_team_members_team ON contest_team_members(team_id);
 
+CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sender_id INTEGER NOT NULL,
+  receiver_id INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  is_read INTEGER DEFAULT 0,
+  deleted_by_sender INTEGER DEFAULT 0,
+  deleted_by_receiver INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id, is_read);
+CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(sender_id, receiver_id, id);
+

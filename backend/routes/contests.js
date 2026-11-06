@@ -6,6 +6,7 @@ const { parsePageLimit } = require('../utils/pagination');
 const { isStaff } = require('../utils/roles');
 const { buildUpdates } = require('../utils/db');
 const { buildUserProblemMap, mergeBest, acceptedTotals, compareByScore, buildStandings, standingsPayload } = require('../utils/standings');
+const { sendCsv } = require('../utils/csv');
 const { createRateLimit } = require('../middleware/ratelimit');
 const crypto = require('crypto');
 
@@ -34,6 +35,92 @@ function toSqliteUtc(d) {
   const date = new Date(d);
   if (isNaN(date.getTime())) return null;
   return date.toISOString().replace('T', ' ').substring(0, 19);
+}
+
+// 榜单计算（排行榜接口与 CSV 导出共用）：时间窗/封榜过滤 + 组队聚合 + 排序补齐名次
+function computeContestStandings(contest) {
+  const { frozen, freezeAt } = resolveContestFreeze(contest);
+  const freezeAtIso = freezeAt ? freezeAt.toISOString() : null;
+  const contestProblems = contestsRepo.listProblemIds(contest.id);
+  const problemIds = contestProblems.map(p => p.problem_id);
+  if (problemIds.length === 0) {
+    return { frozen, freezeAtIso, problemIds: [], leaderboard: [] };
+  }
+
+  // 比赛时间窗口过滤：只统计比赛起止时间范围内的提交；冻结期间只统计到冻结时刻
+  let timeFilter = '';
+  const params = [...problemIds];
+
+  const startUtc = toSqliteUtc(contest.start_time);
+  if (startUtc) {
+    timeFilter += ' AND s.created_at >= ?';
+    params.push(startUtc);
+  }
+
+  if (frozen && freezeAt) {
+    timeFilter += ' AND s.created_at <= ?';
+    params.push(toSqliteUtc(freezeAt));
+  } else if (contest.end_time) {
+    const endUtc = toSqliteUtc(contest.end_time);
+    if (endUtc) {
+      timeFilter += ' AND s.created_at <= ?';
+      params.push(endUtc);
+    }
+  }
+
+  // 榜单仅统计已报名参赛的用户
+  timeFilter += ' AND s.user_id IN (SELECT user_id FROM contest_participants WHERE contest_id = ?)';
+  params.push(contest.id);
+
+  const submissions = contestsRepo.getLeaderboardSubmissions(problemIds, timeFilter, params);
+
+  // 提交聚合行 → 每题最佳成绩映射（按用户分组）；选优/累计/排序/名次统一走 utils/standings
+  const userMap = buildUserProblemMap(submissions);
+
+  let entries;
+  if (contest.team_mode) {
+    // 组队榜：队员成绩逐题取队伍内最优，未组队者保持个人条目
+    const memberRows = contestsRepo.listTeamMemberRows(contest.id);
+    const teamMap = {};
+    for (const t of contestsRepo.listTeams(contest.id)) {
+      teamMap[t.id] = { team_id: t.id, team_name: t.name, problems: {}, members: [] };
+    }
+    const userTeam = {};
+    for (const m of memberRows) {
+      userTeam[m.user_id] = m.team_id;
+      if (teamMap[m.team_id]) {
+        teamMap[m.team_id].members.push({ user_id: m.user_id, username: m.username, nickname: m.nickname });
+      }
+    }
+    for (const u of Object.values(userMap)) {
+      const tid = userTeam[u.user_id];
+      if (tid && teamMap[tid]) mergeBest(teamMap[tid].problems, u.problems);
+    }
+    entries = Object.values(teamMap)
+      .filter(t => t.members.length > 0)
+      .map(t => {
+        const totals = acceptedTotals(t.problems, problemIds);
+        return {
+          team_id: t.team_id, team_name: t.team_name, username: t.team_name, nickname: '',
+          is_team: true, members: t.members,
+          total_score: totals.total_score, total_time: totals.total_time, problems: t.problems
+        };
+      });
+    for (const u of Object.values(userMap)) {
+      if (userTeam[u.user_id]) continue;
+      const totals = acceptedTotals(u.problems, problemIds);
+      entries.push({ user_id: u.user_id, username: u.username, nickname: u.nickname, total_score: totals.total_score, total_time: totals.total_time, problems: u.problems });
+    }
+  } else {
+    entries = Object.values(userMap).map(u => {
+      const totals = acceptedTotals(u.problems, problemIds);
+      return { user_id: u.user_id, username: u.username, nickname: u.nickname, total_score: totals.total_score, total_time: totals.total_time, problems: u.problems };
+    });
+  }
+
+  // 排序：总分降序 → 同分用时升序，随后统一补齐 rank
+  const leaderboard = buildStandings(entries, (a, b) => compareByScore(a, b, (x, y) => x.total_time - y.total_time));
+  return { frozen, freezeAtIso, problemIds, leaderboard };
 }
 
 // 实体可见性（用户组维度）：GET/PUT /:id/visibility
@@ -445,98 +532,76 @@ router.get('/:id/leaderboard', optionalAuth, (req, res) => {
 
   // 判断冻结状态: freeze_minutes>0 且当前时间已过冻结时刻 且 未手动解冻
   const { frozen, freezeAt } = resolveContestFreeze(contest);
+  const freezeAtIso = freezeAt ? freezeAt.toISOString() : null;
 
   // 仅参赛者可查看完整排行榜；教师/管理员/站长放行；非参赛者只返回冻结状态，不泄露排名
   const staff = !!req.user && isStaff(req.user.role);
   const participant = req.user
     ? contestsRepo.findParticipant(contest.id, req.user.id)
     : null;
-  const freezeAtIso = freezeAt ? freezeAt.toISOString() : null;
   // 封榜占位：非参赛者/无题目的空榜，只回传封榜状态，不泄露任何排名
   const frozenState = standingsPayload({ frozen, freeze_at: freezeAtIso });
   if (!staff && !participant) {
     return res.json(frozenState);
   }
-  const contestProblems = contestsRepo.listProblemIds(contest.id);
-  if (contestProblems.length === 0) return res.json(frozenState);
+  if (contestsRepo.listProblemIds(contest.id).length === 0) return res.json(frozenState);
 
-  const problemIds = contestProblems.map(p => p.problem_id);
-
-  // 比赛时间窗口过滤：只统计比赛起止时间范围内的提交；冻结期间只统计到冻结时刻
-  let timeFilter = '';
-  const params = [...problemIds];
-
-  const startUtc = toSqliteUtc(contest.start_time);
-  if (startUtc) {
-    timeFilter += ' AND s.created_at >= ?';
-    params.push(startUtc);
-  }
-
-  if (frozen && freezeAt) {
-    timeFilter += ' AND s.created_at <= ?';
-    params.push(toSqliteUtc(freezeAt));
-  } else if (contest.end_time) {
-    const endUtc = toSqliteUtc(contest.end_time);
-    if (endUtc) {
-      timeFilter += ' AND s.created_at <= ?';
-      params.push(endUtc);
-    }
-  }
-
-  // 榜单仅统计已报名参赛的用户
-  timeFilter += ' AND s.user_id IN (SELECT user_id FROM contest_participants WHERE contest_id = ?)';
-  params.push(contest.id);
-
-  const submissions = contestsRepo.getLeaderboardSubmissions(problemIds, timeFilter, params);
-
-  // 提交聚合行 → 每题最佳成绩映射（按用户分组）；选优/累计/排序/名次统一走 utils/standings
-  const userMap = buildUserProblemMap(submissions);
-
-  let entries;
-  if (contest.team_mode) {
-    // 组队榜：队员成绩逐题取队伍内最优，未组队者保持个人条目
-    const memberRows = contestsRepo.listTeamMemberRows(contest.id);
-    const teamMap = {};
-    for (const t of contestsRepo.listTeams(contest.id)) {
-      teamMap[t.id] = { team_id: t.id, team_name: t.name, problems: {}, members: [] };
-    }
-    const userTeam = {};
-    for (const m of memberRows) {
-      userTeam[m.user_id] = m.team_id;
-      if (teamMap[m.team_id]) {
-        teamMap[m.team_id].members.push({ user_id: m.user_id, username: m.username, nickname: m.nickname });
-      }
-    }
-    for (const u of Object.values(userMap)) {
-      const tid = userTeam[u.user_id];
-      if (tid && teamMap[tid]) mergeBest(teamMap[tid].problems, u.problems);
-    }
-    entries = Object.values(teamMap)
-      .filter(t => t.members.length > 0)
-      .map(t => {
-        const totals = acceptedTotals(t.problems, problemIds);
-        return {
-          team_id: t.team_id, team_name: t.team_name, username: t.team_name, nickname: '',
-          is_team: true, members: t.members,
-          total_score: totals.total_score, total_time: totals.total_time, problems: t.problems
-        };
-      });
-    for (const u of Object.values(userMap)) {
-      if (userTeam[u.user_id]) continue;
-      const totals = acceptedTotals(u.problems, problemIds);
-      entries.push({ user_id: u.user_id, username: u.username, nickname: u.nickname, total_score: totals.total_score, total_time: totals.total_time, problems: u.problems });
-    }
-  } else {
-    entries = Object.values(userMap).map(u => {
-      const totals = acceptedTotals(u.problems, problemIds);
-      return { user_id: u.user_id, username: u.username, nickname: u.nickname, total_score: totals.total_score, total_time: totals.total_time, problems: u.problems };
-    });
-  }
-
-  // 排序：总分降序 → 同分用时升序，随后统一补齐 rank
-  const leaderboard = buildStandings(entries, (a, b) => compareByScore(a, b, (x, y) => x.total_time - y.total_time));
+  const { problemIds, leaderboard } = computeContestStandings(contest);
 
   res.json(standingsPayload({ leaderboard, problem_ids: problemIds, frozen, freeze_at: freezeAtIso }));
+});
+
+// 排行榜 CSV 导出：教师可导出全员（默认），参赛者可导出自己在榜的一行（scope=mine）。
+// 数据与 GET /:id/leaderboard 完全同源（computeContestStandings），封榜口径一致。
+router.get('/:id/export.csv', optionalAuth, (req, res) => {
+  const contest = contestsRepo.get(req.params.id);
+  if (!contest) {
+    return sendNotFound(res, 'Contest not found.');
+  }
+  if (contest.is_hidden && !(req.user && isStaff(req.user.role))) {
+    return sendNotFound(res, 'Contest not found.');
+  }
+  if (!canView(req, 'contest', contest.id)) {
+    return sendForbidden(res, visibilityDeniedMessage('contest'));
+  }
+
+  const staff = !!req.user && isStaff(req.user.role);
+  const participant = req.user ? contestsRepo.findParticipant(contest.id, req.user.id) : null;
+  if (!staff && !participant) {
+    return sendForbidden(res, '仅参赛者可导出该比赛的排行榜。');
+  }
+  const wantAll = staff && String(req.query.scope || 'all') !== 'mine';
+
+  const { problemIds, leaderboard } = computeContestStandings(contest);
+  let entries = leaderboard;
+  if (!wantAll) {
+    entries = leaderboard.filter(e =>
+      e.user_id === req.user.id ||
+      (e.is_team && (e.members || []).some(m => m.user_id === req.user.id))
+    );
+    if (entries.length === 0) {
+      return sendNotFound(res, '未找到你在该比赛排行榜中的记录。');
+    }
+  }
+
+  const header = ['排名', '用户/队伍', '类型', '成员', '总分', '总用时(ms)', ...problemIds.map(id => `题#${id}`)];
+  const csvRows = [
+    header,
+    ...entries.map(e => [
+      e.rank,
+      e.is_team ? e.team_name : e.username,
+      e.is_team ? '队伍' : '个人',
+      e.is_team ? (e.members || []).map(m => m.nickname || m.username).join('、') : (e.nickname || ''),
+      e.total_score,
+      e.total_time,
+      ...problemIds.map(pid => {
+        const p = e.problems[pid];
+        if (!p) return '未提交';
+        return p.status === 'accepted' ? `AC ${p.score} (${p.time_used}ms)` : '未通过';
+      })
+    ])
+  ];
+  return sendCsv(res, `${contest.title}-${wantAll ? '排行榜' : '我的成绩单'}.csv`, csvRows);
 });
 
 // 比赛数据统计：教师始终可看；stats_public=1 时学生可看。

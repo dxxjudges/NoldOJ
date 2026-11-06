@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>私信 - NoldOJ</title>
+  <script src="/js/tailwind.js"></script>
+  <script>tailwind.config={darkMode:'class'}</script>
+  <script src="/js/api.js"></script>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
+  <div id="nav"></div>
+  <div class="max-w-6xl mx-auto px-4 py-6">
+    <div class="flex items-center justify-between mb-4">
+      <h1 class="text-2xl font-bold text-gray-900 dark:text-white">私信</h1>
+      <button onclick="loadConversations()" class="px-3 py-1.5 text-sm rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600">刷新</button>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <!-- 会话列表 -->
+      <aside class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
+        <div class="px-4 py-3 border-b border-gray-100 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300">会话</div>
+        <div id="convList" class="divide-y divide-gray-100 dark:divide-gray-700 max-h-[65vh] overflow-y-auto">
+          <div class="p-6 text-center text-sm text-gray-400 dark:text-gray-500">加载中...</div>
+        </div>
+      </aside>
+
+      <!-- 聊天面板 -->
+      <section class="md:col-span-2 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 flex flex-col h-[70vh]">
+        <div id="chatHeader" class="px-4 py-3 border-b border-gray-100 dark:border-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300">选择左侧会话开始聊天</div>
+        <div id="chatBody" class="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-900/40">
+          <div class="h-full flex items-center justify-center text-sm text-gray-400 dark:text-gray-500">暂无消息</div>
+        </div>
+        <form id="sendForm" onsubmit="sendDm(event)" class="border-t border-gray-100 dark:border-gray-700 p-3 space-y-2">
+          <textarea id="dmInput" maxlength="2000" rows="2" placeholder="输入消息，Enter 发送，Shift+Enter 换行" class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none"></textarea>
+          <div class="flex items-center justify-between">
+            <span id="dmCounter" class="text-xs text-gray-400 dark:text-gray-500">0 / 2000</span>
+            <button id="dmSendBtn" type="submit" disabled class="px-4 py-1.5 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed">发送</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  </div>
+  <script>
+    document.getElementById('nav').innerHTML = renderNav('messages');
+    requireAuth();
+
+    const me = getUser() || {};
+    const params = new URLSearchParams(window.location.search);
+    let currentPeer = null;
+    let firstMessageId = null;
+    const seenIds = new Set();
+
+    function fmtTime(s) {
+      if (!s) return '';
+      const d = new Date(String(s).replace(' ', 'T') + (String(s).includes('Z') ? '' : 'Z'));
+      return Number.isNaN(d.getTime()) ? s : d.toLocaleString();
+    }
+
+    function peerLabel(peer) {
+      return escapeHtml((peer && (peer.nickname || peer.username)) || '');
+    }
+
+    async function loadConversations() {
+      try {
+        const r = await apiCall('GET', '/messages?size=100');
+        const list = r.conversations || [];
+        if (list.length === 0) {
+          document.getElementById('convList').innerHTML = '<div class="p-6 text-center text-sm text-gray-400 dark:text-gray-500">暂无会话，去<a href="/pages/rating.html" class="text-indigo-600 dark:text-indigo-400 hover:underline">用户资料页</a>发起私信</div>';
+          return;
+        }
+        document.getElementById('convList').innerHTML = list.map(c => {
+          const p = c.peer || {};
+          const active = currentPeer && currentPeer.id === p.id;
+          const unread = c.unread > 0 ? `<span class="ml-2 px-1.5 py-0.5 text-xs rounded-full bg-emerald-500 text-white">${c.unread}</span>` : '';
+          return `<div onclick="openConversation('${escapeHtml(p.username)}')" class="px-4 py-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 ${active ? 'bg-indigo-50 dark:bg-indigo-900/20' : ''}">
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-medium text-gray-900 dark:text-white truncate">${escapeHtml(p.nickname || p.username || '')}${unread}</span>
+              <span class="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0 ml-2">${fmtTime(c.last_message && c.last_message.created_at)}</span>
+            </div>
+            <div class="text-xs text-gray-500 dark:text-gray-400 truncate mt-1">${escapeHtml(String((c.last_message && c.last_message.content) || '').slice(0, 40))}</div>
+          </div>`;
+        }).join('');
+      } catch (e) {
+        document.getElementById('convList').innerHTML = `<div class="p-6 text-center text-sm text-red-500">${escapeHtml(e && e.message || '加载失败')}</div>`;
+      }
+    }
+
+    const EMPTY_HINT = '<div class="h-full flex items-center justify-center text-sm text-gray-400 dark:text-gray-500">暂无消息，发第一条打个招呼吧</div>';
+
+    // mode: replace（初次载入）/ append（新消息）/ prepend（加载更早）
+    function renderMessages(messages, mode = 'replace') {
+      const body = document.getElementById('chatBody');
+      if (mode === 'replace') {
+        body.innerHTML = '';
+        seenIds.clear();
+        firstMessageId = null;
+      }
+      const fresh = messages.filter(m => !seenIds.has(m.id));
+      if (fresh.length === 0) {
+        if (mode === 'replace') body.innerHTML = EMPTY_HINT;
+        return;
+      }
+      const html = fresh.map(m => {
+        seenIds.add(m.id);
+        const mine = m.sender_id === me.id;
+        return `<div data-mid="${m.id}" class="flex ${mine ? 'justify-end' : 'justify-start'}">
+          <div class="max-w-[75%]">
+            <div class="px-3 py-2 rounded-2xl text-sm whitespace-pre-wrap break-words ${mine ? 'bg-indigo-600 text-white rounded-br-sm' : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 border border-gray-100 dark:border-gray-600 rounded-bl-sm'}">${escapeHtml(m.content)}</div>
+            <div class="mt-1 text-xs text-gray-400 dark:text-gray-500 ${mine ? 'text-right' : 'text-left'}">
+              ${fmtTime(m.created_at)}
+              <button onclick="deleteDm(${m.id})" class="ml-2 hover:text-red-500" title="删除这条消息">删除</button>
+            </div>
+          </div>
+        </div>`;
+      }).join('');
+
+      if (body.innerHTML.includes('暂无消息')) body.innerHTML = '';
+      if (mode === 'prepend') {
+        const prevHeight = body.scrollHeight;
+        const prevTop = body.scrollTop;
+        body.insertAdjacentHTML('afterbegin', html);
+        body.scrollTop = prevTop + (body.scrollHeight - prevHeight);
+      } else {
+        body.insertAdjacentHTML('beforeend', html);
+        body.scrollTop = body.scrollHeight;
+      }
+      firstMessageId = Math.min(...fresh.map(m => m.id), firstMessageId || Infinity);
+    }
+
+    async function openConversation(username) {
+      if (!username) return;
+      try {
+        const r = await apiCall('GET', `/messages/${encodeURIComponent(username)}?limit=50`);
+        currentPeer = r.peer;
+        window.history.replaceState(null, '', `/pages/messages.html?user=${encodeURIComponent(currentPeer.username)}`);
+        document.getElementById('chatHeader').innerHTML = `与 <span class="font-semibold">${peerLabel(currentPeer)}</span> 的对话`;
+        renderMessages(r.messages || [], 'replace');
+        if ((r.messages || []).length >= 50) {
+          const body = document.getElementById('chatBody');
+          const btn = document.createElement('button');
+          btn.className = 'block mx-auto px-3 py-1 text-xs rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600';
+          btn.textContent = '加载更早的消息';
+          btn.onclick = () => loadOlder(btn);
+          body.insertBefore(btn, body.firstChild);
+        }
+        document.getElementById('dmSendBtn').disabled = false;
+        await markRead();
+        loadConversations();
+      } catch (e) {
+        showToast(e && e.message || '打开会话失败', 'error');
+      }
+    }
+
+    async function loadOlder(btn) {
+      if (!currentPeer || !firstMessageId) return;
+      try {
+        const r = await apiCall('GET', `/messages/${encodeURIComponent(currentPeer.username)}?limit=50&before_id=${firstMessageId}`);
+        const messages = r.messages || [];
+        if (messages.length === 0) {
+          btn.remove();
+          return;
+        }
+        renderMessages(messages, 'prepend');
+        document.getElementById('chatBody').insertBefore(btn, document.getElementById('chatBody').firstChild);
+        if (messages.length < 50) btn.remove();
+      } catch (e) {
+        showToast(e && e.message || '加载失败', 'error');
+      }
+    }
+
+    async function markRead() {
+      if (!currentPeer) return;
+      try {
+        await apiCall('PUT', `/messages/${encodeURIComponent(currentPeer.username)}/read`);
+        refreshMsgBadge();
+      } catch {}
+    }
+
+    async function sendDm(e) {
+      if (e) e.preventDefault();
+      if (!currentPeer) {
+        showToast('请先选择一个会话', 'warning');
+        return;
+      }
+      const input = document.getElementById('dmInput');
+      const content = input.value.trim();
+      if (!content) return;
+      const btn = document.getElementById('dmSendBtn');
+      btn.disabled = true;
+      try {
+        const r = await apiCall('POST', '/messages', { to: currentPeer.username, content });
+        input.value = '';
+        updateCounter();
+        renderMessages([r.data], 'append');
+        loadConversations();
+      } catch (err) {
+        showToast(err && err.message || '发送失败', 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function deleteDm(id) {
+      try {
+        await apiCall('DELETE', `/messages/${id}`);
+        seenIds.delete(id);
+        const body = document.getElementById('chatBody');
+        const nodes = body.querySelectorAll('[data-mid]');
+        nodes.forEach(n => { if (Number(n.getAttribute('data-mid')) === id) n.remove(); });
+        loadConversations();
+      } catch (e) {
+        showToast(e && e.message || '删除失败', 'error');
+      }
+    }
+
+    function updateCounter() {
+      const input = document.getElementById('dmInput');
+      document.getElementById('dmCounter').textContent = `${input.value.length} / 2000`;
+    }
+
+    document.getElementById('dmInput').addEventListener('input', updateCounter);
+    document.getElementById('dmInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendDm(e);
+      }
+    });
+
+    // 实时私信：当前对话直接追加，其它会话刷新列表
+    window.onPrivateMessage = (m) => {
+      if (!currentPeer) { loadConversations(); return; }
+      const inCurrent = (m.sender_id === currentPeer.id && m.receiver_id === me.id) ||
+        (m.sender_id === me.id && m.receiver_id === currentPeer.id);
+      if (inCurrent) {
+        renderMessages([m], 'append');
+        if (m.sender_id === currentPeer.id) markRead();
+      }
+      loadConversations();
+    };
+
+    loadConversations();
+    if (params.get('user')) openConversation(params.get('user'));
+  </script>
+</body>
+</html>
