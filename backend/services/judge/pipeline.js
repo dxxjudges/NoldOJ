@@ -1,4 +1,4 @@
-﻿﻿﻿﻿const db = require('../../database/db');
+const db = require('../../database/db');
 const { emitJudgeStatus, emitContestRanking } = require('../socket');
 const { checkAchievements } = require('../achievements');
 const examProgram = require('../examProgram');

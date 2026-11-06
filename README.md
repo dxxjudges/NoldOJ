@@ -1,4 +1,4 @@
-﻿﻿﻿﻿# NoldOJ - Windows 在线评测系统
+# NoldOJ - Windows 在线评测系统
 
 > ⚠️ **安全警告与免责声明**
 >

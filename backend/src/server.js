@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿const http = require('http');
+const http = require('http');
 const express = require('express');
 // 必须紧跟 express 加载：给 Express 4 的 async 路由处理器补上错误边界。
 // 之前 async handler 同步抛错（如 db.prepare 失败）会变成 unhandledRejection，

@@ -1,4 +1,4 @@
-﻿﻿﻿﻿# NoldOJ API 接口文档
+# NoldOJ API 接口文档
 
 所有接口前缀为 `/api/v1`。响应格式统一为 JSON。
 
