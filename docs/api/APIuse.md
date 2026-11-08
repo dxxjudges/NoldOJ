@@ -155,6 +155,32 @@ user（用户） < teacher（教师） < admin（管理员） < su（超级管�
 
 ---
 
+### POST /auth/forgot-password — 申请重置密码
+
+无需认证（有独立限流 + 图形验证码）。校验「用户名 + 已绑定且已验证的邮箱」是否匹配，匹配则向该邮箱发送 6 位验证码；不匹配时返回统一提示，避免枚举账号。邮件服务未启用或发送失败返回 500。
+
+**请求体：**
+```json
+{ "username": "newuser", "email": "user@example.com" }
+```
+
+**响应：** `{ "message": "重置邮件已发送，请查收。" }`
+
+---
+
+### POST /auth/reset-password — 校验验证码并重置密码
+
+无需认证（有独立限流）。校验验证码后写入新密码，并使该账号所有 refresh_token 失效。新密码须至少 8 位且包含字母与数字或符号。
+
+**请求体：**
+```json
+{ "username": "newuser", "email": "user@example.com", "code": "123456", "new_password": "NewPass123" }
+```
+
+**响应：** `{ "message": "密码已重置，请使用新密码登录。" }`
+
+---
+
 ## 2. 题目模块 `/problems`
 
 ### GET /problems — 题目列表
@@ -164,6 +190,14 @@ user（用户） < teacher（教师） < admin（管理员） < su（超级管�
 ### GET /problems/:id — 题目详情
 
 非公开题目需教师权限。返回题目描述（支持 Markdown）、提供者等。
+
+### GET /problems/:id/visibility — 读取题目可见性
+
+需认证。返回 `{ visibility, groups }`；`visibility` 为 `public` 或 `groups`，`groups` 为绑定的用户组 id 列表（见 `GET /groups`）。
+
+### PUT /problems/:id/visibility — 设置题目可见性
+
+需 admin/su。请求体 `{ "visibility": "public" | "groups", "group_ids": [1, 2] }`；`visibility=groups` 时 `group_ids` 必填且每个组必须存在。返回新的 `{ visibility, groups }`。
 
 ### POST /problems — 创建题目
 
@@ -196,6 +230,10 @@ user（用户） < teacher（教师） < admin（管理员） < su（超级管�
 ### DELETE /problems/:id — 删除题目
 
 需教师权限。级联删除测试点、分组、提交记录。编号自动回收。
+
+### PUT /problems/:id/reindex — 题目重编号
+
+需 admin/su。请求体 `{ "new_id": 128 }`。把题目 id 改到指定空位（正整数、未被占用、目标测试数据目录不存在），事务内同步所有引用 `problem_id` 的表并迁移磁盘测试数据目录。试卷内编程题（`exam_id` 非空）使用独立号段，不允许与题库题目跨号段重编号。成功返回新题目对象（含 `old_id`）。
 
 ### POST /problems/:id/testcases — 添加测试点
 
@@ -238,6 +276,14 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 - 测试点文件：`name.in` + `name.out` 或 `name.ans`
 - `Require.txt`：空格或换行分隔依赖的 Subtask 名称
 - 上传会清空原有测试数据并重建
+
+### GET /problems/:id/export — 导出题目
+
+需教师权限。`?format=json|zip`（默认 `zip`）。返回完整题目包：`problem`（题面、限制、比较模式、SPJ/计分脚本、样例等）、`tags`、`categories`、`test_groups`、`test_cases`。`json` 直接下载 `problem_<id>.json`；`zip` 额外附带 `testdata/<name>.in|.out` 文件，可直接通过 `POST /problems/import` 重新导入。
+
+### POST /problems/import — 导入题目
+
+需教师权限。multipart/form-data，字段名 `file`，支持 `.json` 或 `.zip`（ZIP 内须含 `problem.json`，可选 `testdata/*.in|.out`）。导入会新建题目并复用/创建标签与分类，返回 201 `{ message, problem }`。ZIP 条目数与解压总大小有上限（2000 条 / 200MB）。
 
 ### POST /problems/:id/groups — 创建测试分组
 
@@ -323,6 +369,10 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 ### GET /tags — 标签列表
 
 返回所有标签，按名称排序。
+
+### GET /tags/:id — 标签详情
+
+可选认证。返回标签本身（含 `problem_count`）；非 staff 的 `problem_count` 只统计其可见的题目。
 
 ### POST /tags — 创建标签
 
@@ -535,6 +585,10 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 
 需管理员权限。返回 Rating 和 provider 字段。
 
+### GET /users/:id — 用户管理详情
+
+需管理员权限。返回指定用户的完整管理视图（含角色、封禁状态、上传限制、提交锁豁免等）。
+
 ### GET /users/:id/profile — 公开用户资料
 
 无需认证。返回公开资料（签名、简介、Rating、三个隐私开关 `hide_achievements`/`hide_dashboard`/`hide_favorites` 等）。隐藏 Rating 的用户会隐藏 Rating。三个隐私开关字段供前端判断是否展示该用户的成就/看板/收藏入口。
@@ -648,6 +702,14 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 ### GET /contests/:id — 比赛详情
 
 包含参赛人数。
+
+### GET /contests/:id/visibility — 读取比赛可见性
+
+需认证。返回 `{ visibility, groups }`。
+
+### PUT /contests/:id/visibility — 设置比赛可见性
+
+需 admin/su。请求体 `{ "visibility": "public" | "groups", "group_ids": [1, 2] }`。
 
 ### POST /contests — 创建比赛
 
@@ -847,9 +909,21 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 
 无需认证。仅返回公开题单；登录用户携带进度。
 
+### GET /problem-sets/mine — 我创建的题单
+
+需认证。返回当前用户创建的全部题单（含私有），`{ problem_sets: [...] }`。
+
 ### GET /problem-sets/:id — 题单详情
 
 可选认证。私有题单仅创建者/admin/su 可见。
+
+### GET /problem-sets/:id/visibility — 读取题单可见性
+
+需认证。返回 `{ visibility, groups }`。
+
+### PUT /problem-sets/:id/visibility — 设置题单可见性
+
+需 admin/su。请求体与题目可见性一致：`{ "visibility": "public" | "groups", "group_ids": [1, 2] }`。
 
 ### GET /problem-sets/:id/progress — 当前用户解题进度
 
@@ -959,6 +1033,10 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 ```
 
 **隐私**：查看他人看板时，若目标用户开启了 `hide_dashboard`，则非本人且非 admin/su 的访问返回 `403`。
+
+### GET /statistics/wordcloud — 提交云图
+
+可选认证。按题目统计提交次数，返回 `[{ id, title, submission_count, accepted_count }]`，按提交数降序、最多 200 条。仅统计公开非隐藏且当前用户可见（用户组维度）的题目。
 
 ### 错误码
 
@@ -1100,6 +1178,48 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 
 ---
 
+## 10.17 用户组模块 `/groups`
+
+用户组用于题单/题目/比赛/试卷的可见性绑定（`visibility=groups`）。系统组（`personal` 个人组、`all_users` 全体组）由触发器/回填维护，不可改名、删除或手工增删成员。
+
+### GET /groups — 全部用户组
+
+需管理员权限。返回 `{ groups: [...] }`，每组含 `id`、`name`、`description`、`kind`、`owner_id`、`member_count`、`resource_count`。
+
+### GET /groups/mine — 我加入的组
+
+需认证。返回当前用户所属组（含系统组）的最小字段 `{ id, name, description, kind }`，`{ groups: [...] }`。
+
+### POST /groups — 创建用户组
+
+需管理员权限。请求体 `{ "name": "必修一班", "description": "..." }`，名称必填。返回 201 `{ group }`。
+
+### PUT /groups/:id — 修改用户组
+
+需管理员权限。请求体可含 `name`、`description`（至少传一个）。系统组返回 403。
+
+### DELETE /groups/:id — 删除用户组
+
+需管理员权限。默认 `?force` 未设置时，若仍有实体绑定该组返回 409（message 列出受影响类型与数量）；传 `?force=1` 会先把因本组消失而再无可见组的实体回退为 `public`，再删除组。系统组返回 403。
+
+### GET /groups/:id/members — 组内成员（分页）
+
+需管理员权限。`?page`（默认 1）、`?limit`（默认 20，上限 100）。返回 `{ total, members: [{ id, username, nickname, role }] }`。
+
+### POST /groups/:id/members — 添加成员
+
+需管理员权限。请求体 `{ "user_id": 12 }`。全体组（`all_users`）不可手工加人（403）；个人组仅 owner 本人可加入。
+
+### DELETE /groups/:id/members/:userId — 移除成员
+
+需管理员权限。系统组成员关系不可手工变更（403）。
+
+### POST /groups/:id/import — 批量导入成员
+
+需 **su**。请求体 `{ "users": [{ "username": "...", "nickname": "..." }], "default_password": "..." }`；单次最多 500 行，文件内重复用户名保留首次。未注册账号会用 `default_password` 自动建号（密码须至少 8 位且含字母与数字或符号），账号角色固定为 `user`。系统组返回 403。行级失败不中断整单，返回结果含成功/失败明细。
+
+---
+
 ## 11. 讨论模块 `/discussions`
 
 ### GET /discussions/:id — 讨论详情
@@ -1159,6 +1279,14 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 ### PUT /exams/:id — 编辑试卷
 
 需教师及以上。字段同创建（含 `is_survey`/`is_anonymous`）；另支持封榜控制：`manual_frozen`（`true` 封榜、`false` 解封）、`unfrozen`（`true` 恢复自动封榜，与 `manual_frozen:false` 搭配使用）、`stats_public`（切换学生能否查看统计）。关闭问卷会连带清空 `is_anonymous`；问卷模式下排行榜开关一律落库为 0；携带编程题时同样 400。
+
+### GET /exams/:id/visibility — 读取试卷可见性
+
+需认证。返回 `{ visibility, groups }`。
+
+### PUT /exams/:id/visibility — 设置试卷可见性
+
+需 admin/su。请求体 `{ "visibility": "public" | "groups", "group_ids": [1, 2] }`。
 
 ### DELETE /exams/:id — 删除试卷
 

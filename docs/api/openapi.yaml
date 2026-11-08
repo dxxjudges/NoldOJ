@@ -865,6 +865,63 @@ paths:
         '200':
           description: 修改成功
 
+  /auth/forgot-password:
+    post:
+      tags: [认证]
+      summary: 申请重置密码
+      description: 校验「用户名 + 已绑定且已验证的邮箱」后发送验证码；不匹配时返回统一提示，避免枚举账号。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, email]
+              properties:
+                username:
+                  type: string
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: 重置邮件已发送
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          description: 邮件服务未启用或发送失败
+
+  /auth/reset-password:
+    post:
+      tags: [认证]
+      summary: 校验验证码并重置密码
+      description: 校验验证码后写入新密码，并使该账号所有 refresh_token 失效。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, email, code, new_password]
+              properties:
+                username:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                code:
+                  type: string
+                new_password:
+                  type: string
+                  description: 至少 8 位，且须包含字母与数字或符号
+      responses:
+        '200':
+          description: 密码已重置
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
   # ===== PROBLEMS =====
   /problems:
     get:
@@ -1014,10 +1071,11 @@ paths:
         '200':
           description: 删除成功
 
-  /problems/{id}/testcases:
-    get:
+  /problems/{id}/reindex:
+    put:
       tags: [题目]
-      summary: 查看测试点列表
+      summary: 题目重编号
+      description: 把题目 id 改到指定空位，事务内同步所有引用 problem_id 的表并迁移磁盘测试数据目录。试卷内编程题不可与题库题目跨号段重编号。
       security:
         - bearerAuth: []
       parameters:
@@ -1026,15 +1084,75 @@ paths:
           required: true
           schema:
             type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [new_id]
+              properties:
+                new_id:
+                  type: integer
+                  description: 目标编号（正整数，且未被占用）
       responses:
         '200':
-          description: 测试点列表
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/TestCase'
+          description: 重编号成功（返回新题目对象，含 old_id）
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: 目标编号或测试数据目录已被占用
+
+  /problems/{id}/export:
+    get:
+      tags: [题目]
+      summary: 导出题目
+      description: 返回完整题目包（题面/限制/比较模式/SPJ/计分脚本/样例/标签/分类/测试分组/测试点）。zip 模式额外附带 testdata/*.in|.out 文件。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, zip]
+            default: zip
+      responses:
+        '200':
+          description: 题目数据（application/json 或 application/zip，带下载头）
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /problems/import:
+    post:
+      tags: [题目]
+      summary: 导入题目
+      description: 上传 .json 或 .zip（ZIP 内须含 problem.json，可选 testdata/*.in|.out），新建题目并复用/创建标签与分类。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: ".json 或 .zip 文件"
+      responses:
+        '201':
+          description: 导入成功，返回 { message, problem }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /problems/{id}/testcases:
     post:
       tags: [题目]
       summary: 批量添加测试点
@@ -1402,6 +1520,8 @@ paths:
       responses:
         '201':
           description: 链接成功
+
+  /problems/{id}/solutions/{sid}:
     delete:
       tags: [题目]
       summary: 移除题解
@@ -1609,6 +1729,24 @@ paths:
           description: 创建成功
 
   /tags/{id}:
+    get:
+      tags: [标签]
+      summary: 标签详情
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 标签详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tag'
+        '404':
+          $ref: '#/components/responses/NotFound'
     put:
       tags: [标签]
       summary: 更新标签
@@ -3024,6 +3162,32 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /statistics/wordcloud:
+    get:
+      tags: [统计]
+      summary: 提交云图
+      description: 按题目统计提交次数，仅统计公开非隐藏且当前用户可见（用户组维度）的题目；按提交数降序，最多 200 条。
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 云图数据
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: integer
+                    title:
+                      type: string
+                    submission_count:
+                      type: integer
+                    accepted_count:
+                      type: integer
 
   # ===== FAVORITES =====
   /favorites:
@@ -4638,6 +4802,25 @@ paths:
       responses:
         '201':
           description: 创建成功
+
+  /problem-sets/mine:
+    get:
+      tags: [题单]
+      summary: 我创建的题单
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 当前用户创建的全部题单（含私有）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  problem_sets:
+                    type: array
+                    items:
+                      type: object
 
   /problem-sets/{id}:
     get:
