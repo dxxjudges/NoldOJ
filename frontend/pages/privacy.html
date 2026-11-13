@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>隐私政策 - NoldOJ</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <script src="/js/tailwind.js"></script>
+  <script>tailwind.config={darkMode:'class'}</script>
+  <script src="/js/api.js"></script>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
+  <div id="nav"></div>
+  <div class="max-w-5xl mx-auto px-4 py-10">
+    <div class="mb-8">
+      <h1 class="text-3xl font-bold text-gray-900 dark:text-white">隐私政策</h1>
+      <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">
+        最后更新：2026-11-13　|　生效日期：2026-11-13
+      </p>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-8">
+      <aside class="hidden lg:block">
+        <nav class="sticky top-20 text-sm bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4">
+          <p class="font-semibold text-gray-900 dark:text-white mb-2">目录</p>
+          <ul class="space-y-1.5 text-gray-600 dark:text-gray-400">
+            <li><a href="#intro" class="hover:text-indigo-600 dark:hover:text-indigo-400">1. 引言与适用范围</a></li>
+            <li><a href="#collect" class="hover:text-indigo-600 dark:hover:text-indigo-400">2. 我们收集的信息</a></li>
+            <li><a href="#purpose" class="hover:text-indigo-600 dark:hover:text-indigo-400">3. 信息的使用目的</a></li>
+            <li><a href="#storage" class="hover:text-indigo-600 dark:hover:text-indigo-400">4. 存储与保留期限</a></li>
+            <li><a href="#share" class="hover:text-indigo-600 dark:hover:text-indigo-400">5. 共享与第三方服务</a></li>
+            <li><a href="#cookie" class="hover:text-indigo-600 dark:hover:text-indigo-400">6. Cookie 与本地存储</a></li>
+            <li><a href="#security" class="hover:text-indigo-600 dark:hover:text-indigo-400">7. 安全措施</a></li>
+            <li><a href="#rights" class="hover:text-indigo-600 dark:hover:text-indigo-400">8. 你的权利</a></li>
+            <li><a href="#minor" class="hover:text-indigo-600 dark:hover:text-indigo-400">9. 未成年人保护</a></li>
+            <li><a href="#change" class="hover:text-indigo-600 dark:hover:text-indigo-400">10. 政策变更</a></li>
+            <li><a href="#contact" class="hover:text-indigo-600 dark:hover:text-indigo-400">11. 联系我们</a></li>
+          </ul>
+        </nav>
+      </aside>
+
+      <div class="space-y-6 text-gray-700 dark:text-gray-300 leading-relaxed">
+        <section id="intro" class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6">
+          <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-3">1. 引言与适用范围</h2>
+          <p>NoldOJ（以下简称「本站」）是一个在线评测系统，提供题目练习、代码评测、比赛、试卷、文章与题单等功能。我们深知个人信息对你的重要性，并会尽力保护你的信息安全。</p>
+          <p class="mt-3">本政策说明我们在你注册、登录和使用本站功能时收集哪些信息、如何使用与保存这些信息、以及你对自己信息享有哪些权利。使用本站即表示你已阅读并同意本政策。</p>
+        </section>
+
+        <section id="collect" class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6">
+          <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-3">2. 我们收集的信息</h2>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm border-collapse">
+              <thead>
+                <tr class="text-left text-gray-500 dark:text-gray-400">
+                  <th class="py-2 pr-4 font-medium">信息类型</th>
+                  <th class="py-2 pr-4 font-medium">具体内容</th>
+                  <th class="py-2 font-medium">是否必需</th>
+                </tr>
+              </thead>
+              <tbody class="align-top">
+                <tr class="border-t border-gray-100 dark:border-gray-700">
+                  <td class="py-3 pr-4 whitespace-nowrap">账户信息</td>
+                  <td class="py-3 pr-4">用户名、昵称、密码（仅保存不可逆的哈希值）、角色、Rating 与注册时间；绑定邮箱为选填</td>
+                  <td class="py-3">用户名与密码必需，其余选填</td>
+                </tr>
+                <tr class="border-t border-gray-100 dark:border-gray-700">
+                  <td class="py-3 pr-4 whitespace-nowrap">内容数据</td>
+                  <td class="py-3 pr-4">你提交的源代码与评测结果、题解、文章、讨论、私信、上传文件、比赛与考试记录</td>
+                  <td class="py-3">使用对应功能时产生</td>
+                </tr>
+                <tr class="border-t border-gray-100 dark:border-gray-700">
+                  <td class="py-3 pr-4 whitespace-nowrap">安全与凭据</td>
+                  <td class="py-3 pr-4">登录会话、私人访问令牌（仅保存 SHA-256 摘要与可用于识别的短前缀，不保存明文）</td>
+                  <td class="py-3">登录后产生</td>
+                </tr>
+                <tr class="border-t border-gray-100 dark:border-gray-700">
+                  <td class="py-3 pr-4 whitespace-nowrap">技术信息</td>
+                  <td class="py-3 pr-4">为限流、防刷与安全审计而临时处理的 IP 地址、请求时间与请求路径</td>
+                  <td class="py-3">访问时产生</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="mt-4 text-sm text-gray-500 dark:text-gray-400">我们不会收集与上述功能无关的敏感个人信息，也不会要求你提供身份证件、通讯录、精确位置等信息。</p>
+        </section>
+
+        <section id="purpose" class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6">
+          <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-3">3. 信息的使用目的</h2>
+          <ul class="list-disc pl-5 space-y-1.5">
+            <li>创建与维护账户，完成登录、密码找回与身份验证；</li>
+            <li>编译、运行与评测代码，生成评测结果、排名、成绩单与统计数据；</li>
+            <li>支持比赛、试卷、题单、文章、讨论、私信等站内功能；</li>
+            <li>进行代码查重、违规行为识别与账号安全审计；</li>
+            <li>通过站内通知与你联系，发送与账号、比赛、考试相关的必要提醒；</li>
+            <li>排查故障、优化性能与改进功能体验。</li>
+          </ul>
+          <p class="mt-3">我们不会将你的个人信息用于本政策未说明的用途；如需超出本政策使用，会另行取得你的同意。</p>
+        </section>
+
+        <section id="storage" class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6">
+          <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-3">4. 存储与保留期限</h2>
+          <ul class="list-disc pl-5 space-y-1.5">
+            <li>除另有说明外，数据存储在本站部署所在服务器的数据库中，评测数据与上传文件存储在服务器的受限目录内。</li>
+            <li>账户信息与内容数据在你使用账户期间保留；账号被删除时，相关个人数据与关联记录会一并删除或匿名化。</li>
+            <li>登录会话与私人令牌在过期、被吊销或账号状态变更（改密、重置、强制下线、封禁）时立即失效。</li>
+            <li>用于限流与安全审计的技术日志仅在实现上述目的所必需的较短期限内保留。</li>
+          </ul>
+        </section>
+
+        <section id="share" class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6">
+          <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-3">5. 共享与第三方服务</h2>
+          <p>我们不会出售、出租你的个人信息。仅在以下情形中可能向第三方提供必要数据：</p>
+          <ul class="list-disc pl-5 mt-2 space-y-1.5">
+            <li><span class="font-medium">代码安全审查与 AI 功能：</span>提交代码进行安全审查、请求 AI 思路提示或生成测试数据时，相关代码或题目内容会发送至本站配置的 AI 服务。该服务可能为本机部署，也可能为外部服务，具体取决于本站的配置。</li>
+            <li><span class="font-medium">邮件服务：</span>启用邮箱验证或密码找回时，你的邮箱地址会提供给本站配置的邮件服务商，仅用于发送验证码或重置邮件。</li>
+            <li><span class="font-medium">法律要求：</span>依据法律法规、司法或行政机关的强制性要求，我们可能披露必要信息。</li>
+          </ul>
+          <p class="mt-3">公开区域（如题解、讨论、公开代码、比赛排名）中的内容对站内或站外可见，请勿在其中发布你不希望被他人看到的信息。</p>
+        </section>
+
+        <section id="cookie" class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6">
+          <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-3">6. Cookie 与本地存储</h2>
+          <ul class="list-disc pl-5 space-y-1.5">
+            <li><span class="font-medium">refresh_token：</span>保存在 HttpOnly Cookie 中，用于维持登录状态，脚本无法读取；退出登录或会话失效后清除。</li>
+            <li><span class="font-medium">本地存储：</span>浏览器会保存用于访问接口的短期访问令牌、界面偏好（如暗色模式）以及「已关闭公告」等标记。</li>
+          </ul>
+          <p class="mt-3">本站不使用第三方广告或行为追踪 Cookie。你可以通过浏览器设置清除这些数据，但清除后需要重新登录。</p>
+        </section>
+
+        <section id="security" class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6">
+          <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-3">7. 安全措施</h2>
+          <ul class="list-disc pl-5 space-y-1.5">
+            <li>密码使用 bcrypt 单向哈希保存，无法还原为明文；</li>
+            <li>私人访问令牌仅保存摘要，明文只在创建时展示一次；</li>
+            <li>登录凭据通过 HttpOnly Cookie 与短期访问令牌配合使用，并支持强制下线；</li>
+            <li>用户代码在受限沙箱中编译与运行（低完整性级别、资源限制与权限隔离），避免影响服务器与其他用户；</li>
+            <li>按角色与权限范围控制数据访问，并对高频请求进行限流。</li>
+          </ul>
+          <p class="mt-3">尽管我们采取了上述措施，互联网环境仍不存在绝对安全。请妥善保管密码与令牌，不要与他人共享账号。</p>
+        </section>
+
+        <section id="rights" class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6">
+          <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-3">8. 你的权利</h2>
+          <ul class="list-disc pl-5 space-y-1.5">
+            <li><span class="font-medium">查询与更正：</span>在「个人资料」页面查看并修改昵称、签名、偏好设置等信息；</li>
+            <li><span class="font-medium">管理凭据：</span>在「令牌」页面查看、创建与吊销私人访问令牌；在「设置」中修改密码或退出登录；</li>
+            <li><span class="font-medium">删除：</span>如需注销账号或删除特定内容，请联系站点管理员；账号删除后相关数据将按第 4 节处理；</li>
+            <li><span class="font-medium">撤回同意：</span>你可以停止使用本站或申请注销账号来撤回同意，但这不影响此前基于同意已进行的处理。</li>
+          </ul>
+        </section>
+
+        <section id="minor" class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6">
+          <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-3">9. 未成年人保护</h2>
+          <p>本站主要面向编程学习者。若你未满 14 周岁，请在监护人同意与指导下使用本站；监护人如发现未成年人未经同意注册，可联系管理员删除相关账号与信息。</p>
+        </section>
+
+        <section id="change" class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6">
+          <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-3">10. 政策变更</h2>
+          <p>我们可能因功能调整或法律要求更新本政策。更新后会在本页面标注新的「最后更新」日期；涉及重大变更时，我们会通过站内公告或通知告知你。继续使用本站即视为接受更新后的政策。</p>
+        </section>
+
+        <section id="contact" class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6">
+          <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-3">11. 联系我们</h2>
+          <p>如对本政策有疑问、需要行使上述权利或投诉信息处理问题，可通过站内私信联系管理员，或在「公告」页面查看站点公布的联系方式。我们会在合理期限内答复。</p>
+        </section>
+
+        <p class="text-sm text-gray-500 dark:text-gray-400 text-center pt-2">
+          <a href="/pages/index.html" class="text-indigo-600 dark:text-indigo-400 hover:underline">返回首页</a>
+        </p>
+      </div>
+    </div>
+  </div>
+  <script>
+    document.getElementById('nav').innerHTML = renderNav('');
+  </script>
+</body>
+</html>
