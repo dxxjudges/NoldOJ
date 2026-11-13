@@ -8,6 +8,10 @@ info:
     大部分接口需携带 JWT Token：`Authorization: Bearer <access_token>`
     Access Token 有效期 15 分钟，过期后通过 `POST /auth/refresh` 刷新。
 
+    也可使用私人访问令牌（PAT）：`Authorization: Bearer noldoj_pat_...`，有效期与权限范围（read/submit/write/account）
+    在创建时指定。PAT 不能访问凭证类接口（`/users/me/tokens*`、`/auth/change-password`、`/users/sudo-login`、
+    `/users/{id}/reset-password`）。任何有效凭据均可调用 `GET /auth/tokeninfo` 查询自身权限与到期时间。
+
     ## 错误响应
     ```json
     { "code": 1|2|3|4|5|6, "reason": "ERR_xxx", "message": "..." }
@@ -593,6 +597,79 @@ components:
         unread:
           type: integer
 
+    PersonalAccessToken:
+      type: object
+      description: 私人访问令牌信息（不含明文与摘要）
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+          description: 令牌名称
+        prefix:
+          type: string
+          description: 令牌前缀（`noldoj_pat_` + 13 位随机字符），用于识别令牌
+        scopes:
+          type: array
+          description: 权限范围
+          items:
+            type: string
+            enum: [read, submit, write, account]
+        expires_at:
+          type: string
+          nullable: true
+          description: UTC 到期时间（`YYYY-MM-DD HH:MM:SS`）；永久令牌为 null
+        permanent:
+          type: boolean
+          description: 是否永久有效（`expires_at` 为 null）
+        last_used_at:
+          type: string
+          nullable: true
+          description: 最近使用时间（服务端按 60 秒节流更新）；未使用过为 null
+        created_at:
+          type: string
+
+    PersonalAccessTokenCreated:
+      allOf:
+        - $ref: '#/components/schemas/PersonalAccessToken'
+        - type: object
+          description: 创建令牌的成功响应，`token` 明文仅本次返回
+          properties:
+            token:
+              type: string
+              description: 完整明文令牌（`noldoj_pat_` + 32 位 base64url），仅在创建时返回一次
+          required: [token]
+
+    TokenInfo:
+      type: object
+      description: 当前凭据自检结果
+      properties:
+        auth_type:
+          type: string
+          enum: [jwt, pat]
+        user:
+          type: object
+          properties:
+            id:
+              type: integer
+            username:
+              type: string
+            nickname:
+              type: string
+            role:
+              type: string
+              enum: [user, teacher, admin, su]
+        token:
+          allOf:
+            - $ref: '#/components/schemas/PersonalAccessToken'
+            - type: object
+              properties:
+                expired:
+                  type: boolean
+                  description: 按到期时间判断是否已过期（不代表已吊销）
+          nullable: true
+          description: 使用 PAT 时返回令牌详情；JWT 时为 null
+
   parameters:
     PageParam:
       name: page
@@ -842,10 +919,30 @@ paths:
         '200':
           description: 退出成功
 
+  /auth/tokeninfo:
+    get:
+      tags: [认证]
+      summary: 检测当前凭据
+      description: |
+        返回当前请求所用的凭据类型（JWT / PAT）、对应用户；PAT 额外返回名称、权限范围、到期信息与是否已过期。
+        该接口不要求任何 scope，任何有效凭据都可以查询自己。响应带 `Cache-Control: no-store`。
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 凭据信息
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
   /auth/change-password:
     post:
       tags: [认证]
       summary: 修改密码
+      description: 仅限登录会话（JWT）；PAT 调用返回 403。修改后所有 refresh_token 与该用户全部 PAT 失效。
       security:
         - bearerAuth: []
       requestBody:
@@ -2314,6 +2411,110 @@ paths:
         '200':
           description: 虚拟比赛列表
 
+  /users/me/tokens:
+    get:
+      tags: [用户]
+      summary: 我的访问令牌列表
+      description: 仅限登录会话（JWT），PAT 调用返回 403。不返回明文与摘要。
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 令牌列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tokens:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PersonalAccessToken'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [用户]
+      summary: 创建访问令牌
+      description: |
+        仅限登录会话（JWT），PAT 调用返回 403。限流：每用户每小时最多 10 次；每人最多 20 个令牌。
+        明文 `token` 只在创建响应中返回一次（`Cache-Control: no-store`），请立即保存。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, scopes]
+              properties:
+                name:
+                  type: string
+                  maxLength: 50
+                  description: 令牌名称，去除前后空白后不能为空
+                expires_in_days:
+                  type: integer
+                  minimum: 0
+                  maximum: 3650
+                  default: 30
+                  description: 有效天数；0=永久；缺省 30
+                scopes:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    enum: [read, submit, write, account]
+                  description: 权限范围，至少一个合法值，出现未知值返回 400
+      responses:
+        '201':
+          description: 创建成功（含一次性明文令牌）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalAccessTokenCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /users/me/tokens/{id}:
+    delete:
+      tags: [用户]
+      summary: 吊销访问令牌
+      description: 仅限登录会话（JWT），PAT 调用返回 403。只能吊销属于自己的令牌，否则返回 404。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 已吊销
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revoked:
+                    type: boolean
+                  id:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /users/{id}/profile:
     get:
       tags: [用户]
@@ -2650,8 +2851,8 @@ paths:
                     type: string
                   max_file_size:
                     type: integer
-                    max_storage:
-                      type: integer
+                  max_storage:
+                    type: integer
 
   /users/register-enabled:
     get:

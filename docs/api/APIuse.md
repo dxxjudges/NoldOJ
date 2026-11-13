@@ -16,6 +16,30 @@ Access Token 有效期 15 分钟，过期后通过 `POST /auth/refresh` 刷新�
 
 封禁用户和被强制登出用户的 Access Token 和 Refresh Token 均会被拒绝（通过 `force_logout_at` 时间戳 + JWT `iat` 比对）。
 
+#### 私人访问令牌（PAT）
+
+除 JWT 外，也可使用在「令牌」设置页创建的私人访问令牌作为 Access Token，适合脚本、CLI 等无法走浏览器登录的场景：
+
+```
+Authorization: Bearer noldoj_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+- 格式为 `noldoj_pat_` + 32 位 base64url 随机串，**明文只在创建时返回一次**，之后无法再次获取。
+- 有效期：创建时指定天数（默认 30 天，上限 3650 天），或传 `0` 表示永久有效；过期后鉴权返回 401。
+- 权限范围（scope），多个 scope 取并集，未授予的对应请求返回 403 `ERR_FORBIDDEN`：
+
+| scope | 允许的操作 |
+| --- | --- |
+| `read` | 所有 GET / HEAD / OPTIONS 请求 |
+| `submit` | `POST /submissions`、`POST /exams/:id/submit`、`/ide` 下的非 GET 请求 |
+| `write` | 其他非 GET 写操作（受限接口与 `/users/me*` 除外） |
+| `account` | `/users/me` 及其子路径的写操作（令牌管理除外） |
+
+- 以下凭证类接口**禁止 PAT 访问**，只能使用登录会话（JWT）：`/users/me/tokens*`、`/auth/change-password`、`/users/sudo-login`、`/users/:id/reset-password`。
+- 被封禁用户、已吊销或已过期的令牌都会被拒绝；修改密码、重置密码、封禁、强制登出、删除用户时，该用户全部 PAT 会同步吊销。
+- 携带 PAT 且不带 Cookie 的写请求不受 CSRF / Origin 校验限制。
+- 任何有效凭据（JWT 或 PAT）均可调用 `GET /auth/tokeninfo` 查询自身权限与到期时间。
+
 ### 角色层级
 
 ```
@@ -144,9 +168,38 @@ user（用户） < teacher（教师） < admin（管理员） < su（超级管�
 
 ---
 
+### GET /auth/tokeninfo — 检测当前凭据
+
+需认证（JWT 或 PAT 均可，且不要求任何 scope）。返回当前请求所用的凭据类型与对应用户；使用 PAT 时额外返回该令牌的名称、权限范围、到期信息与是否已过期。响应头带 `Cache-Control: no-store`。
+
+**响应（PAT）：**
+```json
+{
+  "auth_type": "pat",
+  "user": { "id": 7, "username": "alice", "nickname": "Alice", "role": "user" },
+  "token": {
+    "id": 3,
+    "name": "CI deploy",
+    "prefix": "noldoj_pat_AbCdEfGhIjKlM",
+    "scopes": ["read", "submit"],
+    "expires_at": "2027-01-01 00:00:00",
+    "permanent": false,
+    "expired": false,
+    "last_used_at": "2026-11-08 10:00:00",
+    "created_at": "2026-11-01 09:00:00"
+  }
+}
+```
+
+**响应（JWT）：** `auth_type` 为 `"jwt"`，`token` 为 `null`。
+
+`expires_at` 为 UTC 时间；`permanent=true` 表示永久令牌（此时 `expires_at` 为 `null`）。`expired` 仅反映到期时间是否已过，不代表令牌已被吊销。
+
+---
+
 ### POST /auth/change-password — 修改密码
 
-需认证。修改后所有 refresh_token 失效。
+需认证，且仅限登录会话（PAT 不能调用）。修改后所有 refresh_token 与该用户全部 PAT 失效。
 
 **请求体：**
 ```json
@@ -605,23 +658,92 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 
 需认证。可更新 `nickname`、`signature`（1000字限制）、`bio`（Markdown）、`hide_rating`、`preferred_language`，以及三个隐私开关 `hide_achievements`、`hide_dashboard`、`hide_favorites`（boolean，开启后对其它普通用户隐藏对应数据，admin/su 始终可见）。
 
+PAT 调用需要 `account` scope。
+
+### GET /users/me/tokens — 我的访问令牌列表
+
+需登录会话（JWT），PAT 不能调用（返回 403）。返回当前用户的全部令牌，**不含明文与摘要**。
+
+**响应：**
+```json
+{
+  "tokens": [
+    {
+      "id": 3,
+      "name": "CI deploy",
+      "prefix": "noldoj_pat_AbCdEfGhIjKlM",
+      "scopes": ["read", "submit"],
+      "expires_at": "2027-01-01 00:00:00",
+      "permanent": false,
+      "last_used_at": "2026-11-08 10:00:00",
+      "created_at": "2026-11-01 09:00:00"
+    }
+  ]
+}
+```
+
+永久令牌的 `expires_at` 为 `null`、`permanent` 为 `true`；`last_used_at` 未使用过时为 `null`（服务端按 60 秒节流更新）。
+
+### POST /users/me/tokens — 创建访问令牌
+
+需登录会话（JWT），PAT 不能调用。**限流**：每用户每小时最多 10 次。**数量上限**：每人最多 20 个令牌，超出返回 400。
+
+**请求体：**
+```json
+{
+  "name": "CI deploy",
+  "expires_in_days": 30,
+  "scopes": ["read", "submit"]
+}
+```
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `name` | 是 | 令牌名称，≤50 字符，去除前后空白后不能为空 |
+| `expires_in_days` | 否 | 有效天数，整数 `0`~`3650`；`0`=永久；缺省为 `30` |
+| `scopes` | 是 | 至少一个合法值：`read` / `submit` / `write` / `account`；出现未知值或为空返回 400 |
+
+**成功响应 (201)**（`Cache-Control: no-store`；明文 `token` 只在本次返回，请立即保存）：
+
+```json
+{
+  "id": 3,
+  "name": "CI deploy",
+  "token": "noldoj_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "prefix": "noldoj_pat_AbCdEfGhIjKlM",
+  "scopes": ["read", "submit"],
+  "expires_at": "2027-01-01 00:00:00",
+  "permanent": false,
+  "created_at": "2026-11-01 09:00:00"
+}
+```
+
+### DELETE /users/me/tokens/:id — 吊销访问令牌
+
+需登录会话（JWT），PAT 不能调用。只能吊销属于自己的令牌；令牌不存在或不属于当前用户时返回 404。
+
+**响应：**
+```json
+{ "revoked": true, "id": 3 }
+```
+
 ### PUT /users/:id/role — 修改角色
 
 需超级管理员权限。不能修改自己的角色，不能降级另一个超级管理员。
 
 ### POST /users/:id/ban — 封禁用户
 
-需管理员权限。封禁时踢出登录，设置 `force_logout_at` 使 Access Token 立即失效。
+需管理员权限。封禁时踢出登录，设置 `force_logout_at` 使 Access Token 立即失效，并吊销该用户全部 PAT。
 
 ### POST /users/:id/unban — 解封用户
 
 ### POST /users/:id/force-logout — 强制登出
 
-需管理员权限。删除 refresh_token + 设置 `force_logout_at`，Access Token 立即失效。
+需管理员权限。删除 refresh_token + 设置 `force_logout_at`，Access Token 立即失效，同时吊销该用户全部 PAT。
 
 ### POST /users/:id/reset-password — 重置密码
 
-需超级管理员权限。
+需超级管理员权限，仅限登录会话（PAT 不能调用）。重置后该用户所有 refresh_token 与 PAT 失效。
 
 ### PUT /users/:id/rating — 修改 Rating
 
@@ -637,8 +759,10 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 
 **请求体：**
 ```json
-{ "max_upload_bytes": 10485760, "total_upload_bytes": 2147483648 }
+{ "max_file_size": 10485760, "max_storage": 2147483648 }
 ```
+
+两字段均为字节数，`0` 表示使用系统默认（10MB / 2GB）。
 
 ### PUT /users/:id/submit-lock-exempt — 设置提交锁豁免
 
