@@ -71,6 +71,7 @@ function ban(id) {
   db.prepare('UPDATE users SET banned = 1, updated_at = datetime(\'now\') WHERE id = ?').run(id);
   db.prepare("UPDATE users SET force_logout_at = datetime('now') WHERE id = ?").run(id);
   db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(id);
+  db.prepare('DELETE FROM personal_access_tokens WHERE user_id = ?').run(id);
 }
 
 function unban(id) {
@@ -79,12 +80,14 @@ function unban(id) {
 
 function forceLogout(id) {
   db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(id);
+  db.prepare('DELETE FROM personal_access_tokens WHERE user_id = ?').run(id);
   db.prepare("UPDATE users SET force_logout_at = datetime('now') WHERE id = ?").run(id);
 }
 
 function resetPassword(id, hash) {
   db.prepare('UPDATE users SET password_hash = ?, updated_at = datetime(\'now\') WHERE id = ?').run(hash, id);
   db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(id);
+  db.prepare('DELETE FROM personal_access_tokens WHERE user_id = ?').run(id);
   // 与 force-logout 一致：否则已签发的 access token 在过期前仍可用旧密码继续操作
   db.prepare("UPDATE users SET force_logout_at = datetime('now') WHERE id = ?").run(id);
 }
@@ -110,6 +113,7 @@ function deleteUserCascade(target) {
     db.exec('BEGIN');
     db.exec('PRAGMA defer_foreign_keys = ON');
     db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(target.id);
+    db.prepare('DELETE FROM personal_access_tokens WHERE user_id = ?').run(target.id);
     // 清理该用户作为作者/创建者的依赖数据（FK 已开启，需在删除前处理，避免 500）
     db.prepare('DELETE FROM discussion_replies WHERE author_id = ?').run(target.id);
     db.prepare('DELETE FROM discussions WHERE author_id = ?').run(target.id);

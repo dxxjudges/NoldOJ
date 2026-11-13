@@ -115,8 +115,11 @@ async function main() {
   // 同源浏览器导航与 curl 裸调 GET/HEAD/OPTIONS 不受影响。
   app.use((req, res, next) => {
     const origin = req.headers.origin;
-    const hasCreds = !!(req.headers.cookie || /^Bearer\b/i.test(req.headers.authorization || ''));
-    if (!origin && hasCreds && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    const authHeader = req.headers.authorization || '';
+    const hasCreds = !!(req.headers.cookie || /^Bearer\b/i.test(authHeader));
+    // 私人令牌供 CLI/脚本使用，天然不依赖 Cookie；仅严格匹配 PAT 形态且未携带 Cookie 时豁免。
+    const isPatRequest = !req.headers.cookie && /^Bearer\s+noldoj_pat_[A-Za-z0-9_-]{32}$/.test(authHeader.trim());
+    if (!origin && hasCreds && !['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !isPatRequest) {
       return res.status(403).json({ code: 4, reason: 'ERR_FORBIDDEN', message: 'Origin header is required for credentialed requests.' });
     }
     next();
@@ -185,6 +188,7 @@ async function main() {
   const submissionRoutes = require('../routes/submissions');
   const ideRoutes = require('../routes/ide');
   const userRoutes = require('../routes/users');
+  const tokenRoutes = require('../routes/tokens');
   const languageRoutes = require('../routes/languages');
   const contestRoutes = require('../routes/contests');
   const articleRoutes = require('../routes/articles');
@@ -212,6 +216,8 @@ async function main() {
   app.use('/api/v1/problems', problemRoutes);
   app.use('/api/v1/submissions', submissionRoutes);
   app.use('/api/v1/ide', ideRoutes);
+  // 令牌管理路由挂在更具体的路径上，且必须先于 /users 注册
+  app.use('/api/v1/users/me/tokens', tokenRoutes);
   app.use('/api/v1/users', userRoutes);
   app.use('/api/v1/languages', languageRoutes);
   app.use('/api/v1/contests', contestRoutes);

@@ -753,6 +753,22 @@ async function initDB() {
   sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_messages_receiver ON messages(receiver_id, is_read)');
   sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(sender_id, receiver_id, id)');
 
+  // 私人访问令牌：DDL 与 schema.sql 逐字一致（新库由 schema.sql 建出，老库在此自愈）
+  sqlDb.exec(`CREATE TABLE IF NOT EXISTS personal_access_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    token_prefix TEXT NOT NULL,
+    token_hash TEXT UNIQUE NOT NULL,
+    scopes TEXT NOT NULL DEFAULT '[]',
+    expires_at TEXT DEFAULT NULL,
+    last_used_at TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`);
+  sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_pat_prefix ON personal_access_tokens(token_prefix)');
+  sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_pat_user ON personal_access_tokens(user_id)');
+
   return sqlDb;
 }
 

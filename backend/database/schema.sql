@@ -34,6 +34,22 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
+-- 私人访问令牌：仅存 SHA-256 摘要，明文只在创建时返回一次；expires_at 为 NULL 表示永久
+CREATE TABLE IF NOT EXISTS personal_access_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  token_prefix TEXT NOT NULL,
+  token_hash TEXT UNIQUE NOT NULL,
+  scopes TEXT NOT NULL DEFAULT '[]',
+  expires_at TEXT DEFAULT NULL,
+  last_used_at TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_pat_prefix ON personal_access_tokens(token_prefix);
+CREATE INDEX IF NOT EXISTS idx_pat_user ON personal_access_tokens(user_id);
+
 CREATE TABLE IF NOT EXISTS languages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT UNIQUE NOT NULL,

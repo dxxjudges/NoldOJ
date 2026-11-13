@@ -1,4 +1,4 @@
-﻿const express = require('express');
+﻿﻿﻿﻿﻿﻿﻿﻿const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const authRepo = require('../repositories/auth');
@@ -294,6 +294,29 @@ router.post('/logout', (req, res) => {
   }
   res.clearCookie('refresh_token');
   res.json({ message: 'Logged out successfully.' });
+});
+
+// 凭据自检：返回当前使用的凭据类型、对应用户；PAT 额外返回权限范围与到期信息。
+// 该接口不对 scope 设限，任何有效凭据都可以查询自己。
+router.get('/tokeninfo', requireAuth, (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const payload = {
+    auth_type: req.authType,
+    user: {
+      id: req.user.id,
+      username: req.user.username,
+      nickname: req.user.nickname,
+      role: req.user.role
+    },
+    token: req.authType === 'pat' ? { ...req.patToken } : null
+  };
+  if (payload.token) {
+    const expiresMs = payload.token.expires_at
+      ? Date.parse(`${payload.token.expires_at.replace(' ', 'T')}Z`)
+      : null;
+    payload.token.expired = !!expiresMs && expiresMs <= Date.now();
+  }
+  res.json(payload);
 });
 
 router.post('/change-password', requireAuth, changePasswordRateLimit, (req, res) => {

@@ -28,6 +28,7 @@ function banUserAndRevoke(userId) {
   db.prepare('UPDATE users SET banned = 1, updated_at = datetime(\'now\') WHERE id = ?').run(userId);
   db.prepare("UPDATE users SET force_logout_at = datetime('now') WHERE id = ?").run(userId);
   db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(userId);
+  db.prepare('DELETE FROM personal_access_tokens WHERE user_id = ?').run(userId);
 }
 
 // 存储型 XSS 纵深防御（D-H4）：库中内容不直接可执行。

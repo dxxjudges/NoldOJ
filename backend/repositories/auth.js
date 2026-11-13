@@ -48,8 +48,9 @@ function resetPassword(userId, hash) {
   try {
     db.exec('BEGIN');
     db.prepare("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?").run(hash, userId);
-    // 重置后强制所有会话下线
+    // 重置后强制所有会话下线，私人令牌一并吊销
     db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM personal_access_tokens WHERE user_id = ?').run(userId);
     db.prepare("UPDATE users SET force_logout_at = datetime('now') WHERE id = ?").run(userId);
     db.exec('COMMIT');
   } catch (err) {
@@ -66,6 +67,7 @@ function changePassword(userId, hash) {
     // D-L2: 修改密码同时吊销旧 access token（否则最长 15 分钟仍有效）
     db.prepare("UPDATE users SET force_logout_at = datetime('now') WHERE id = ?").run(userId);
     db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(userId);
+    db.prepare('DELETE FROM personal_access_tokens WHERE user_id = ?').run(userId);
     db.exec('COMMIT');
   } catch (err) {
     try { db.exec('ROLLBACK'); } catch { /* 回滚失败不掩盖原始错误（外层已 rethrow） */ }
