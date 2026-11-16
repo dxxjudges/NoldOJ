@@ -43,6 +43,26 @@ router.put('/register-enabled', requireAuth, requireRole('su'), (req, res) => {
   res.json({ enabled });
 });
 
+// 代码提交总开关查询/热切换（仅超管）。关闭后判题提交与 IDE 运行/审查一律拒绝
+router.get('/submission-enabled', requireAuth, requireRole('su'), (req, res) => {
+  res.json({ enabled: config.submission.enabled });
+});
+router.put('/submission-enabled', requireAuth, requireRole('su'), (req, res) => {
+  const { enabled } = req.body;
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'enabled 必须为布尔值。' });
+  }
+  try {
+    const content = '# 代码提交总开关（判题 + IDE）：true = 允许提交 / false = 全部拒绝\nSUBMISSION_ENABLED=' + (enabled ? 'true' : 'false') + '\n';
+    fs.writeFileSync(config.submission.path, content, 'utf8');
+  } catch (err) {
+    return res.status(500).json({ code: 2, reason: 'ERR_INTERNAL', message: '写入配置失败: ' + sanitizeLog(String(err.message || err)) });
+  }
+  config.submission.enabled = enabled; // 热更新内存态
+  audit(req.user, enabled ? '开启代码提交' : '关闭代码提交', null);
+  res.json({ enabled });
+});
+
 // 公开排行榜。show_hidden=1 需要登录且 admin/su（optionalAuth 保持公开访问，同时对隐私分支显式认证）
 router.get('/rating', optionalAuth, (req, res) => {
   const { page = 1, limit = 50, show_hidden = '' } = req.query;

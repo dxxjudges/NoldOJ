@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { requireAuth, requireRole } = require('../../middleware/auth');
 const { createRateLimit } = require('../../middleware/ratelimit');
+const { requireSubmissionsEnabled } = require('../../middleware/submissionGuard');
 const { enqueueSubmission } = require('../../services/judge');
 const { reviewCode, CODE_LENGTH_LIMIT } = require('../../services/security');
 const { sanitizeLog, banUserAndRevoke } = require('../../utils/securityHelpers');
@@ -122,7 +123,7 @@ function defaultFilename(language) {
   return map[language] || 'main.txt';
 }
 
-router.post('/', requireAuth, rateLimit, async (req, res) => {
+router.post('/', requireAuth, requireSubmissionsEnabled, rateLimit, async (req, res) => {
   const { problem_id, language, source_code, code, answer_data, files, virtual_contest_id, contest_id } = req.body;
 
   if (!problem_id) {

@@ -118,6 +118,29 @@ function reloadRegisterConfig() {
   return cfg.enabled;
 }
 
+// ── 代码提交总开关: config/submission.txt 的 SUBMISSION_ENABLED=，默认开启；
+//    由超管面板热切换，关闭后判题提交与 IDE 运行/审查一律拒绝 ──
+const submissionPath = path.join(__dirname, '..', '..', 'config', 'submission.txt');
+function loadSubmissionConfig() {
+  const result = { enabled: true };
+  try {
+    const content = fs.readFileSync(submissionPath, 'utf8');
+    for (const line of content.split('\n')) {
+      const t = line.trim();
+      if (t.startsWith('SUBMISSION_ENABLED=')) result.enabled = t.split('=').slice(1).join('=').trim() === 'true';
+    }
+  } catch {
+    // config/submission.txt 缺失或不可读时使用默认值
+  }
+  return result;
+}
+const submissionCfg = loadSubmissionConfig();
+function reloadSubmissionConfig() {
+  const cfg = loadSubmissionConfig();
+  submissionCfg.enabled = cfg.enabled;
+  return cfg.enabled;
+}
+
 // ── 判题并发: config/judge.txt 的 MAX_THREADS= 或环境变量 NoldOJ_JUDGE_THREADS，
 //    默认 (CPU 数 + 1) / 2，最小 1 ──
 function loadJudgeConfig() {
@@ -308,6 +331,13 @@ module.exports = {
     set enabled(v) { registerCfg.enabled = !!v; },
     reload: reloadRegisterConfig,
     path: registerPath
+  },
+  submission: {
+    // 代码提交总开关（含 IDE），默认开启；供超管接口热切换
+    get enabled() { return submissionCfg.enabled; },
+    set enabled(v) { submissionCfg.enabled = !!v; },
+    reload: reloadSubmissionConfig,
+    path: submissionPath
   },
   email: {
     enabled: email.enabled,

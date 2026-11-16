@@ -921,6 +921,10 @@
       wrap.classList.remove('hidden');
       wrap.classList.add('inline-flex');
       refreshRegisterToggle();
+      const subWrap = document.getElementById('submissionToggleWrap');
+      subWrap.classList.remove('hidden');
+      subWrap.classList.add('inline-flex');
+      refreshSubmissionToggle();
     }
     async function refreshRegisterToggle() {
       try {
@@ -942,6 +946,27 @@
         const res = await apiCall('PUT', '/users/register-enabled', { enabled: next });
         paintRegisterToggle(res.enabled);
       } catch (err) { showToast(err.message || '操作失败', 'error'); refreshRegisterToggle(); }
+    }
+    async function refreshSubmissionToggle() {
+      try {
+        const data = await apiCall('GET', '/users/submission-enabled');
+        paintSubmissionToggle(data.enabled);
+      } catch { document.getElementById('submissionToggleBtn').textContent = '?'; }
+    }
+    function paintSubmissionToggle(enabled) {
+      const btn = document.getElementById('submissionToggleBtn');
+      btn.dataset.enabled = enabled ? '1' : '0';
+      btn.textContent = enabled ? '已开放' : '已关闭';
+      btn.className = 'font-semibold ' + (enabled ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400');
+    }
+    async function toggleSubmission() {
+      const btn = document.getElementById('submissionToggleBtn');
+      const next = btn.dataset.enabled !== '1';
+      if (!confirm(next ? '确定开放代码提交？' : '确定关闭所有代码提交？（判题与 IDE 运行将立即被拒绝）')) return;
+      try {
+        const res = await apiCall('PUT', '/users/submission-enabled', { enabled: next });
+        paintSubmissionToggle(res.enabled);
+      } catch (err) { showToast(err.message || '操作失败', 'error'); refreshSubmissionToggle(); }
     }
 
     function showCreateUser() {

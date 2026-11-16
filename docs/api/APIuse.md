@@ -797,6 +797,21 @@ PAT 调用需要 `account` scope。
 - 关闭后 `POST /auth/register` 返回 403 `ERR_REGISTER_DISABLED` 且不消耗注册限流配额
 - 超管通过 `POST /users` 创建账号不受此开关影响
 
+### GET /users/submission-enabled — 查询代码提交总开关
+
+需超级管理员权限。返回 `{ "enabled": true/false }`，默认 `true`。
+
+### PUT /users/submission-enabled — 切换代码提交总开关
+
+需超级管理员权限。请求体 `{ "enabled": true/false }`（布尔值，必填）。
+
+- 写入 `config/submission.txt` 并热更新内存态，无需重启
+- 关闭后以下接口一律返回 403 `ERR_SUBMISSION_DISABLED`（`code: 2`）：
+  - `POST /submissions`（判题提交，含考试编程题）
+  - `POST /ide/run`（IDE 运行）
+  - `POST /ide/review`（IDE 代码安全审查）
+- 未登录请求仍先返回 401，不暴露开关状态；`GET` 类查询接口不受影响
+
 ---
 
 ## 6. 语言管理模块 `/languages`（仅超级管理员）

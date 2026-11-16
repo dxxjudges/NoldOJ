@@ -298,6 +298,10 @@
             <span class="text-gray-500 dark:text-gray-400 mr-2">自行注册</span>
             <button id="registerToggleBtn" onclick="toggleRegister()" class="font-semibold"></button>
           </span>
+          <span id="submissionToggleWrap" class="hidden items-center mr-2 px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm">
+            <span class="text-gray-500 dark:text-gray-400 mr-2">代码提交</span>
+            <button id="submissionToggleBtn" onclick="toggleSubmission()" class="font-semibold"></button>
+          </span>
           <button onclick="showCreateUser()" class="px-3 py-1.5 bg-indigo-600 text-white rounded-xl text-sm hover:bg-indigo-700">+ 创建用户</button>
           <button onclick="document.getElementById('excelImportInput').click()" class="px-3 py-1.5 bg-green-600 text-white rounded-xl text-sm hover:bg-green-700">导入 Excel</button>
           <a href="/user-sample.xlsx" download="NoldOJ用户导入示例.xlsx" title="含列说明与示例数据，可直接参照填写"

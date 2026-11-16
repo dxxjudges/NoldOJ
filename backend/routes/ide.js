@@ -2,6 +2,7 @@ const express = require('express');
 const ideRepo = require('../repositories/ide');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { createRateLimit } = require('../middleware/ratelimit');
+const { requireSubmissionsEnabled } = require('../middleware/submissionGuard');
 const config = require('../config/config');
 const { reviewCode, CODE_LENGTH_LIMIT } = require('../services/security');
 const { banUserAndRevoke } = require('../utils/securityHelpers');
@@ -20,7 +21,7 @@ router.get('/languages', (req, res) => {
 });
 
 // S-4/D-M5: review 改 requireAuth —— 匿名分支无业务区分，且降低 AI 服务被匿名滥用的面
-router.post('/review', requireAuth, reviewRateLimit, async (req, res) => {
+router.post('/review', requireAuth, requireSubmissionsEnabled, reviewRateLimit, async (req, res) => {
   const { language, source_code } = req.body;
   if (!language || !source_code || source_code.length < 50) {
     return res.json({ safe: true });
@@ -38,7 +39,7 @@ router.post('/review', requireAuth, reviewRateLimit, async (req, res) => {
 });
 
 // 匿名用户可通过反复调用本接口消耗服务器资源：仅允许登录用户执行代码
-router.post('/run', requireAuth, rateLimit, async (req, res) => {
+router.post('/run', requireAuth, requireSubmissionsEnabled, rateLimit, async (req, res) => {
   const { language, source_code, stdin } = req.body;
 
   if (!language || !source_code) {
