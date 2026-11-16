@@ -20,7 +20,9 @@
 > ```
 > 未编译时 Windows 默认 fail-closed 拒绝判题（不再静默裸跑）；本地开发可显式设 `NoldOJ_ALLOW_NO_SANDBOX=1` 回退传统模式（spawn，安全性较低）。
 
-专为 Windows 平台设计的在线评测系统，支持多语言代码评测、安全沙箱执行、自定义计分脚本、比赛管理、文章系统、Rating 机制、AI 代码安全审查、黑夜模式、SVG 图形验证码、模糊搜索、公告系统、题目标签与难度、代码 Diff 对比、多文件提交、WebSocket 实时推送、排行榜冻结、题单训练计划、讨论/题解区、虚拟比赛、代码查重等功能。
+专为 Windows 平台设计的在线评测系统，支持多语言代码评测、安全沙箱执行、自定义计分脚本、比赛管理、文章系统、Rating 机制、AI 代码安全审查、私人令牌（PAT）、黑夜模式、SVG 图形验证码、模糊搜索、公告系统、题目标签与难度、代码 Diff 对比、多文件提交、WebSocket 实时推送、排行榜冻结、题单训练计划、讨论/题解区、虚拟比赛、代码查重、通知中心、错题本、每日一题、比赛组队等功能。
+
+官网：https://nold.dxxj.de5.net/ ｜ API 文档：https://nold.dxxj.de5.net/api/ ｜ 下载：https://github.com/dxxjudges/NoldOJ/releases/latest
 
 ## 功能特性
 
@@ -54,7 +56,7 @@
 
 ### 黑夜模式
 - **一键切换**：导航栏太阳/月亮图标切换，localStorage 记忆主题
-- **全局适配**：19 个页面所有元素（卡片、表格、输入框、按钮、下拉菜单）全面暗色适配
+- **全局适配**：全部页面（卡片、表格、输入框、按钮、下拉菜单）全面暗色适配
 - **自动初始化**：页面加载时立即读取主题，防止闪烁
 
 ### 题目管理
@@ -218,8 +220,18 @@
 - **图形验证码**：登录和注册需通过 SVG 图形验证码验证，防止自动化攻击
 - **注册限流**：单个 IP 每小时仅可注册 1 次
 - **速率限制**：提交和 IDE 运行接口均有固定窗口限流（`windowMs` 内计数超过 `max` 即返回 429）
+- **私人令牌（PAT）**：`noldoj_pat_` 前缀 + 32 位随机串，可设权限范围（`read` / `submit` / `write` / `account`）与有效期（含永久）；明文只在创建时返回一次，数据库仅存 SHA-256 摘要与前缀索引；改密、重置密码、封禁、强制登出、删号时自动吊销
 - **输入校验**：SQL 注入防护、源码大小限制（128KB）、语言可用性检查
 - **沙箱隔离**：用户代码在独立临时目录执行，结束后自动清理
+
+### 私人令牌（PAT）
+
+- **创建入口**：登录后进入「令牌」设置页（`/pages/settings.html`）新建，最多 20 个
+- **权限范围**：`read`（GET/HEAD）、`submit`（提交代码、IDE 运行、交卷）、`write`（其余写操作）、`account`（个人资料等 `/users/me*` 写操作）
+- **有效期**：预设 7 / 30 / 90 / 180 / 365 天或自定义天数，`0` 表示永久（上限 3650 天）
+- **使用方式**：作为 Access Token 使用，`Authorization: Bearer noldoj_pat_...`
+- **限制**：不能用于令牌管理、修改密码、免密登录、重置他人密码等凭证类接口；创建接口限流 10 次/小时/用户
+- **自检**：`GET /api/v1/auth/tokeninfo` 返回当前凭据类型、对应用户、令牌 scope 与到期时间（免 scope 限制）
 
 ## 环境要求
 
@@ -228,7 +240,9 @@
 | **Node.js** | >= 24.x（需内置 node:sqlite） | 运行后端服务，内置 SQLite 引擎 |
 | **Mingw64** | 任意版本 | C/C++ 编译 |
 | **Python 3** | 任意版本 | Python 代码执行（可选） |
-| **JDK** | 任意版本 | Java 编译和执行（可选） |
+| **JDK** | 任意版本 | Java 编译和执行（可选；一键安装包内为 Java 26） |
+| **Git** | 任意版本 | 源码安装时拉取仓库（一键安装包中为可选项） |
+| **Cloudflared** | 最新版 | Cloudflare Tunnel 公网穿透（可选；仅局域网使用无需安装） |
 | **操作系统** | Windows 10 及以上 | 主要支持平台（Node 24 官方构建最低要求 Win10；沙箱运行器最低需 Win8+，整体以 Node 要求为准） |
 | **Ollama** | 任意版本 | AI 代码安全审查（可选，需加载 qwen3:1.7b 模型） |
 
@@ -236,22 +250,28 @@
 
 ### 安装
 
-（等待b站教程发出）
+#### 方式一：一键安装包（推荐）
 
-文字版：
+从 [Releases](https://github.com/dxxjudges/NoldOJ/releases/latest) 下载 `OJDependenciesSetup.exe`（约 424MB），需要管理员权限：
 
-自行下载以上依赖和Git并安装
+- **必选**：NoldOJ 本体（安装包内含最新版本）、MinGW64、Node.js
+- **可选**：Git、Java 26 (JDK)、Python、Cloudflared
+- **仅局域网内使用请勿勾选 Cloudflared**：它只用于通过 Cloudflare Tunnel 把站点暴露到公网，不选时快捷方式指向 `start.bat`，勾选后指向 `st.bat`
+- 默认安装到 `C:\NoldOJ\`，安装后约 1.89GB（只装必选约 1.01GB），安装时无需联网
 
-找到你想安装到的目录
+#### 方式二：源码安装
 
-在此处打开cmd
+自行安装 Node.js 24+、MinGW-w64、Git（可选 Python 3 / JDK），在目标目录打开 cmd：
 
-输入
 ```batch
-git clone https://gitee.com/dxx114514/NoldOJ.git
+git clone https://github.com/dxxjudges/NoldOJ.git
+cd NoldOJ\backend
+npm install
+cd ..
+start.bat
 ```
-GitHub 镜像：https://github.com/dxxjudges/NoldOJ
-完成后运行`start.bat`
+
+国内镜像：`git clone https://gitee.com/dxx114514/NoldOJ.git`
 
 **首次启动时自动迁移 problems/ 目录**：
 - 若根目录存在 `problems/` 且 `backend/data/problems/` 不存在，`start.bat` 会自动将其移动到 `backend/data/problems/`
@@ -285,7 +305,7 @@ npm run lint        :: ESLint 静态检查
 npm run test:server :: 黑盒安全/登录测试（需服务已启动，见下）
 ```
 
-- `npm test` 覆盖计分脚本解释器、输出比较、限流、查重、考试/比赛、问卷、Excel 导入、沙箱真实编译、初始管理员口令策略共 17 个文件、282 项用例。
+- `npm test` 覆盖计分脚本解释器、输出比较、限流、查重、考试/比赛、问卷、Excel 导入、沙箱真实编译、初始管理员口令策略、私人令牌等共 29 个文件、345 项用例。
 - 需要数据库的测试自动使用 `%TEMP%\NoldOJ-test\` 下的独立库，**不读写生产库** `backend/data/NoldOJ.db`，测试中断也不会留下脏数据。
 - `sandbox.test.js` 会真实调用 g++ 编译 C++，未安装 MinGW 的环境自动跳过这 3 个用例。
 - 三处 Excel 导入均提供站内示例文件（含列说明与可照抄的示例行，放在 `frontend/pages/` 由静态服务以根路径提供）：
@@ -438,9 +458,11 @@ NoldOJ/
 ├── start.bat               # 一键启动脚本
 ├── st.bat                  # 一键启动脚本（含cloudflare tunnel启动和混合输出）
 ├── README.md               # 项目说明
-├── docs/
-│   ├── api/openapi.yaml    # OpenAPI 3.0 规范文档（含 APIuse.md 接口文档）
-│   └── support.html        # 支持页 / FAQ
+├── docs/                   # 官网（GitHub Pages，https://nold.dxxj.de5.net/）
+│   ├── index.html          # 官网首页
+│   ├── support.html        # 支持页 / FAQ
+│   ├── proxyban.txt        # 下载镜像黑名单
+│   └── api/                # APIuse.md 接口文档 + openapi.yaml + index.html 渲染页
 ├── config/                 # 外部配置文件（已被 .gitignore 忽略）
 │   ├── ai.txt              # AI 代码安全审查配置
 │   ├── email.txt           # 邮件发送配置
@@ -451,16 +473,16 @@ NoldOJ/
 │   ├── database/           # 数据库 schema 和初始化（含自动迁移）
 │   ├── data/               # 运行时数据：SQLite 库 + 题目测试数据 problems/（自动创建）
 │   ├── middleware/         # 认证、限流、管理员操作日志
-│   ├── routes/             # API 路由（37 个文件，23 个挂载前缀，181 个端点）
+│   ├── routes/             # API 路由（26 个文件，28 个挂载前缀，155 个处理函数）
 │   ├── services/           # 评测引擎 + IDE 评测 + AI 安全审查 + 验证码 + 查重
 │   ├── sandbox/            # 代码执行沙箱 + 计分脚本解释器
-│   ├── test/               # 测试（17 个文件：`npm test` 单测 282 项 + 黑盒 `test:server` security 24 项 + reset-login 6 项断言）
+│   ├── test/               # 测试（29 个文件：`npm test` 单测 345 项 + 黑盒 `test:server` security 24 项 + reset-login 6 项断言）
 │   └── src/                # 服务器入口
 ├── frontend/
 │   ├── css/                # 全局样式（含暗色模式覆盖）
 │   ├── js/                 # 公共 JS（API 封装、Markdown 渲染、导航栏）
 │   ├── favicon.svg         # 网站图标
-│   └── pages/              # HTML 页面（43 个页面，全中文界面，支持 Markdown/KaTeX）
+│   └── pages/              # HTML 页面（49 个页面，全中文界面，支持 Markdown/KaTeX）
 ├── scripts/                # 工具脚本（种子数据、favicon 添加等）
 ├── log/                    # 运行日志（按启动时间戳建目录，已被 .gitignore 忽略）
 └── data/                   # 上传文件等运行时数据（自动创建）
@@ -476,6 +498,15 @@ NoldOJ/
 | **超级管理员** | 最高权限 | 所有权限 + 修改角色、重置密码、免密登录、管理语言、设置 Rating、自删除、设置图床限额 |
 
 ## 更新日志
+
+### 新增：私人令牌（PAT）/ 隐私政策与用户协议
+- **私人令牌**：新增 `personal_access_tokens` 表与 `/users/me/tokens` 系列接口（列表 / 创建 / 吊销），权限范围 `read` / `submit` / `write` / `account`，有效期支持预设、自定义与永久（上限 3650 天），每人最多 20 个，创建限流 10 次/小时；明文仅创建时返回一次，库中只存 SHA-256 摘要与前缀索引
+- **凭据自检**：新增 `GET /auth/tokeninfo`，返回当前凭据类型、对应用户、令牌 scope 与到期时间，任何有效凭据均可调用
+- **生命周期联动**：修改密码、重置密码、封禁、强制登出、删除用户时自动吊销该用户全部私人令牌
+- **前端**：新增 `/pages/settings.html` 令牌设置页，导航栏加入「令牌」入口（桌面与移动端）
+- **合规页面**：新增 `/pages/privacy.html` 隐私政策与 `/pages/terms.html` 用户协议，首页页脚、登录页与注册页加入入口与同意提示
+- **测试**：新增 `test/personal-tokens.test.js` 13 项
+- **文档**：`docs/api/APIuse.md`、`docs/api/openapi.yaml` 补充 PAT 与 tokeninfo 接口说明
 
 ### 新增：私信 / CSV 成绩单导出
 - **私信**：新增 `messages` 表与 `/messages` 系列接口（会话列表/历史/发送/已读/删除/未读数）。一对一私信按发送方、接收方分别软删，双方都删后物理清理；发送接口 2000 字上限、30 条/分钟限流，拒绝给自己发信与向封禁用户发信；发送后通过 Socket.IO `message` 事件实时推送给双方，导航栏新增信封入口与未读角标，个人资料页新增「发私信」按钮，新增 `/pages/messages.html`
