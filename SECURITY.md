@@ -41,7 +41,9 @@
 
 - **三层安全架构**：低完整性级别（Low IL，强制 workDir 降级、禁止写高完整性对象）+ Job Object
   （`CREATE_SUSPENDED` 绑定杜绝竞态逃逸、`KILL_ON_JOB_CLOSE` 整树秒杀、禁用 `BREAKAWAY` 防脱离、CPU/内存/进程数限制）
-  + 受限令牌（禁用 Administrators 等特权组、剥离 `SeDebugPrivilege`/`SeImpersonatePrivilege` 等高危特权）；
+  + 受限令牌（禁用 Administrators 等特权组、剥离 `SeDebugPrivilege`/`SeImpersonatePrivilege`/`SeCreateGlobalPrivilege` 等 19 项高危特权，
+  并启用 `WRITE_RESTRICTED` + `LUA_TOKEN`：写访问只由用户 SID/登录会话 SID 授权，组授权不再放行；
+  CPython 启动依赖组写权限，`.py` 自动豁免，可用 `NoldOJ_WRITE_RESTRICTED=1` 强制，`NoldOJ_NO_WRITE_RESTRICTED=1`/`NoldOJ_NO_LUA=1` 单独关闭）；
   以管理员/服务运行时额外尝试 AppContainer 文件系统与网络隔离（容器令牌在独立子进程构建，API 崩溃时安全回退受限令牌）。
 - **fail-closed 默认**：Windows 上 `sandbox_runner.exe` 未编译时**默认拒绝判题**，不静默裸跑；
   只有显式设置 `NoldOJ_ALLOW_NO_SANDBOX=1` 才回退到不安全的传统模式（仅限本地开发）。

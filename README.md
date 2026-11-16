@@ -11,7 +11,7 @@
 > - **权限降级**：`CreateRestrictedToken` 剥离 `SeDebugPrivilege`、`SeImpersonatePrivilege` 等高危特权
 > - **资源限制**：内存上限、CPU 时间限制、进程数限制
 > - **数据隔离**：每次判题使用独立临时目录，判题结束后暴力删除；SQLite 启用 WAL 模式防止锁死
-> - **三层安全架构（低完整性级别 + Job Object + 受限令牌/AppContainer）**：低完整性级别强制 workDir 标记为 LOW IL，禁止向高完整性对象写入；Job Object 兜底 CPU/内存/进程数限制；受限令牌剥离高危特权、禁用 Administrators 等特权组；以管理员/服务运行时额外尝试 AppContainer 文件系统+网络隔离（容器令牌在独立子进程构建，API 崩溃时自动安全回退到受限令牌，不影响输出捕获）
+> - **三层安全架构（低完整性级别 + Job Object + 受限令牌/AppContainer）**：低完整性级别强制 workDir 标记为 LOW IL，禁止向高完整性对象写入；Job Object 兜底 CPU/内存/进程数限制；受限令牌剥离 19 项高危特权（含 `SeCreateGlobalPrivilege`）、禁用 Administrators 等特权组，并启用 `WRITE_RESTRICTED`（写访问只认用户 SID 与登录会话 SID）+ `LUA_TOKEN`（C++/Java/JS 生效；CPython 因启动依赖组写权限自动豁免，可用 `NoldOJ_WRITE_RESTRICTED=1` 强制）；以管理员/服务运行时额外尝试 AppContainer 文件系统+网络隔离（容器令牌在独立子进程构建，API 崩溃时自动安全回退到受限令牌，不影响输出捕获）
 >
 > 编译沙箱运行器（需要 MinGW）：
 > ```bat

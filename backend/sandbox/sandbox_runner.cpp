@@ -220,6 +220,7 @@ static HANDLE createRestrictedTokenFrom(HANDLE hCurrentToken) {
         SE_SHUTDOWN_NAME, SE_SYSTEM_ENVIRONMENT_NAME, SE_UNDOCK_NAME,
         SE_PROF_SINGLE_PROCESS_NAME, SE_INCREASE_QUOTA_NAME,
         SE_INC_BASE_PRIORITY_NAME, SE_CREATE_SYMBOLIC_LINK_NAME,
+        SE_CREATE_GLOBAL_NAME,
     };
     for (const char* name : privNames) {
         LUID luid;
@@ -247,16 +248,96 @@ static HANDLE createRestrictedTokenFrom(HANDLE hCurrentToken) {
             groupsToDisable.push_back({ groupSids[i], 0 });
     }
 
+    // ── 限制性 SID（WRITE_RESTRICTED 的写访问白名单）─────────
+    // 只保留当前用户 SID 与登录会话 SID：任何「写」访问都必须由这两个
+    // SID 之一在 DACL 中授权，Users / Everyone / Authenticated Users 等
+    // 组授权不再放行，从而把可写范围收窄到本人私有对象（工作目录、
+    // 本人 TEMP、父进程管道等），降低对同机其他对象的破坏面。
+    std::vector<PSID> restrictSidStorage;
+    auto cloneSid = [&](PSID sid) -> PSID {
+        if (!sid || !IsValidSid(sid)) return NULL;
+        DWORD len = GetLengthSid(sid);
+        PSID copy = (PSID)malloc(len);
+        if (!copy) return NULL;
+        memcpy(copy, sid, len);
+        restrictSidStorage.push_back(copy);
+        return copy;
+    };
+
+    DWORD need = 0;
+    GetTokenInformation(hCurrentToken, TokenUser, NULL, 0, &need);
+    if (need) {
+        std::vector<char> buf(need);
+        if (GetTokenInformation(hCurrentToken, TokenUser, buf.data(), need, &need))
+            cloneSid(((TOKEN_USER*)buf.data())->User.Sid);
+    }
+    need = 0;
+    GetTokenInformation(hCurrentToken, TokenGroups, NULL, 0, &need);
+    if (need) {
+        std::vector<char> buf(need);
+        if (GetTokenInformation(hCurrentToken, TokenGroups, buf.data(), need, &need)) {
+            TOKEN_GROUPS* tg = (TOKEN_GROUPS*)buf.data();
+            for (DWORD i = 0; i < tg->GroupCount; i++) {
+                if (tg->Groups[i].Attributes & SE_GROUP_LOGON_ID) {
+                    cloneSid(tg->Groups[i].Sid);
+                    break;
+                }
+            }
+        }
+    }
+
+    // 注意：限制性 SID 的 Attributes 必须为 0；传 SE_GROUP_ENABLED 会让
+    // CreateRestrictedToken 返回 ERROR_INVALID_PARAMETER(87)（已实测）。
+    std::vector<SID_AND_ATTRIBUTES> restrictAttrs;
+    for (PSID sid : restrictSidStorage)
+        restrictAttrs.push_back({ sid, 0 });
+
+    // 诊断开关（与 NoldOJ_NO_LOWIL 风格一致），用于定位特定解释器/运行时的兼容问题
+    bool wantWr = !(getenv("NoldOJ_NO_WRITE_RESTRICTED") && getenv("NoldOJ_NO_WRITE_RESTRICTED")[0] == '1');
+    bool wantLua = !(getenv("NoldOJ_NO_LUA") && getenv("NoldOJ_NO_LUA")[0] == '1');
+
+    // CPython 启动阶段依赖「组授权」的写权限（安装目录/缓存），开启
+    // WRITE_RESTRICTED 会以 STATUS_DLL_INIT_FAILED(0xC0000142) 失败。
+    // 由 executor 通过 NoldOJ_SANDBOX_EXT 传入源码扩展名，Python 单独豁免；
+    // 需要强制启用时设 NoldOJ_WRITE_RESTRICTED=1。
+    const char* srcExt = getenv("NoldOJ_SANDBOX_EXT");
+    bool forceWr = getenv("NoldOJ_WRITE_RESTRICTED") && getenv("NoldOJ_WRITE_RESTRICTED")[0] == '1';
+    if (srcExt && _stricmp(srcExt, ".py") == 0 && !forceWr) {
+        if (wantWr) sandboxLog("WRITE_RESTRICTED skipped for .py (CPython needs group-granted writes)");
+        wantWr = false;
+    }
+
+    // 按优先级尝试：WRITE_RESTRICTED|LUA_TOKEN → 仅 WRITE_RESTRICTED → 仅 LUA → 原有限制性令牌
+    DWORD flagSets[4];
+    int nSets = 0;
+    if (wantWr && wantLua) flagSets[nSets++] = WRITE_RESTRICTED | LUA_TOKEN;
+    if (wantWr) flagSets[nSets++] = WRITE_RESTRICTED;
+    if (wantLua) flagSets[nSets++] = LUA_TOKEN;
+    flagSets[nSets++] = 0;
+
     HANDLE hRestricted = NULL;
-    BOOL ok = CreateRestrictedToken(
-        hCurrentToken, 0,
-        (DWORD)groupsToDisable.size(), groupsToDisable.empty() ? NULL : groupsToDisable.data(),
-        (DWORD)privsToDelete.size(), privsToDelete.data(),
-        0, NULL,
-        &hRestricted
-    );
+    BOOL ok = FALSE;
+    for (int i = 0; i < nSets && !ok; i++) {
+        DWORD flags = flagSets[i];
+        DWORD restrictCount = (flags & WRITE_RESTRICTED) ? (DWORD)restrictAttrs.size() : 0;
+        PSID_AND_ATTRIBUTES restrictPtr = restrictCount ? restrictAttrs.data() : NULL;
+        SetLastError(0);
+        ok = CreateRestrictedToken(
+            hCurrentToken, flags,
+            (DWORD)groupsToDisable.size(), groupsToDisable.empty() ? NULL : groupsToDisable.data(),
+            (DWORD)privsToDelete.size(), privsToDelete.data(),
+            restrictCount, restrictPtr,
+            &hRestricted
+        );
+        if (!ok)
+            sandboxLog("CreateRestrictedToken(flags=%lu) failed (error %lu), trying next fallback",
+                       (unsigned long)flags, GetLastError());
+        else if (i > 0)
+            sandboxLog("CreateRestrictedToken fell back to flags=%lu", (unsigned long)flags);
+    }
     for (int i = 0; i < 4; i++)
         if (groupSids[i]) LocalFree(groupSids[i]);
+    for (PSID sid : restrictSidStorage) free(sid);
     return ok ? hRestricted : NULL;
 }
 

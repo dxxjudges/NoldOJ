@@ -258,7 +258,9 @@ function runCodeSandboxed(workDir, srcFile, exeFile, lang, stdin, timeLimitMs, m
     const proc = spawn(SANDBOX_RUNNER_PATH, runnerArgs, {
       cwd: workDir,
       stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true
+      windowsHide: true,
+      // 供 sandbox_runner 判定语言特性（如 CPython 不兼容 WRITE_RESTRICTED）
+      env: { ...process.env, NoldOJ_SANDBOX_EXT: lang.ext || '' }
     });
 
     // 超时保险: 即使 sandbox_runner.exe 自身卡住也要杀掉
