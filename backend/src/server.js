@@ -206,6 +206,7 @@ async function main() {
   const aiHintRoutes = require('../routes/aiHint');
   const statusRoutes = require('../routes/status');
   const examRoutes = require('../routes/exams');
+  const homeworkRoutes = require('../routes/homeworks');
   const groupRoutes = require('../routes/groups');
   const notificationRoutes = require('../routes/notifications');
   const notebookRoutes = require('../routes/notebook');
@@ -236,6 +237,7 @@ async function main() {
   app.use('/api/v1/problems', aiHintRoutes);
   app.use('/api/v1/system', statusRoutes);
   app.use('/api/v1/exams', examRoutes);
+  app.use('/api/v1/homeworks', homeworkRoutes);
   app.use('/api/v1/groups', groupRoutes);
   app.use('/api/v1/notifications', notificationRoutes);
   app.use('/api/v1/notebook', notebookRoutes);

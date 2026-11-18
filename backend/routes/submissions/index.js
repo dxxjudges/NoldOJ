@@ -9,6 +9,7 @@ const { reviewCode, CODE_LENGTH_LIMIT } = require('../../services/security');
 const { sanitizeLog, banUserAndRevoke } = require('../../utils/securityHelpers');
 const { parsePageLimit } = require('../../utils/pagination');
 const { checkExamWindow } = require('../../utils/examWindow');
+const { checkHomeworkWindow } = require('../../utils/homeworkWindow');
 const { problemVisibilityError } = require('../../utils/visibility');
 const { visibilityDeniedMessage, canView } = require('../_visibility');
 const { isStaff } = require('../../utils/roles');
@@ -214,6 +215,58 @@ router.post('/', requireAuth, requireSubmissionsEnabled, rateLimit, async (req, 
     return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'exam_id 仅用于试卷内编程题。' });
   }
 
+  // ── 作业编程题提交校验：逐题提交、逐题回填得分（services/homeworkProgram.js）──
+  let homeworkCtx = null;
+  if (req.body.homework_id) {
+    const hwRepo = require('../../repositories/homeworks');
+    const homework = hwRepo.getHomework(req.body.homework_id);
+    if (!homework) {
+      return sendNotFound(res, 'Homework not found.');
+    }
+    const staffUser = isStaff(req.user.role);
+    if (!homework.is_public && !staffUser) {
+      return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Homework is not public.' });
+    }
+    if (homework.is_hidden && !staffUser) {
+      return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: 'Homework not found.' });
+    }
+    if (!canView(req, 'homework', homework.id)) {
+      return sendForbidden(res, visibilityDeniedMessage('homework'));
+    }
+    const winMsg = checkHomeworkWindow(homework, req.user);
+    if (winMsg) {
+      return res.status(403).json({ code: 6, reason: 'ERR_FORBIDDEN', message: winMsg });
+    }
+    if (virtual_contest_id || contest_id) {
+      return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '作业题不支持比赛提交。' });
+    }
+    const question = hwRepo.getQuestion(req.body.homework_question_id);
+    if (!question || question.homework_id !== homework.id) {
+      return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'homework_question_id 与作业不匹配。' });
+    }
+    if (question.question_type !== 'program') {
+      return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '该作业题目不是编程题。' });
+    }
+    if (Number(question.problem_id) !== Number(problem_id)) {
+      return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'problem_id 与该作业题目不匹配。' });
+    }
+    const used = hwRepo.countUserAttempts(homework.id, question.id, req.user.id);
+    if (!staffUser && question.max_submissions > 0 && used >= question.max_submissions) {
+      return res.status(400).json({ code: 1, reason: 'ERR_MAX_SUBMISSIONS', message: '该题提交次数已用尽。' });
+    }
+    if (problem.exam_id) {
+      return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: '试卷题目不能作为作业题提交。' });
+    }
+    homeworkCtx = {
+      homeworkId: homework.id,
+      questionId: question.id,
+      attemptNo: used + 1,
+      maxScore: Number(question.score) || 0
+    };
+  } else if (req.body.homework_question_id) {
+    return res.status(400).json({ code: 1, reason: 'ERR_INVALID_ARGUMENT', message: 'homework_question_id 仅用于作业编程题。' });
+  }
+
   // 功能9：虚拟比赛提交校验
   let effectiveVirtualContestId = virtual_contest_id || null;
   if (virtual_contest_id) {
@@ -327,6 +380,9 @@ router.post('/', requireAuth, requireSubmissionsEnabled, rateLimit, async (req, 
     virtualContestId: effectiveVirtualContestId,
     examId: problem.exam_id || null,
     examAttempt: examAttempt || 0,
+    homeworkId: homeworkCtx ? homeworkCtx.homeworkId : null,
+    homeworkQuestionId: homeworkCtx ? homeworkCtx.questionId : null,
+    homeworkAnswer: homeworkCtx,
     files: normalizedFiles
   });
 

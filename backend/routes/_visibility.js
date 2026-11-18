@@ -17,7 +17,8 @@ const RESOURCE_ALIAS = {
   problem: 'p',
   contest: 'c',
   exam: 'e',
-  problem_set: 'ps'
+  problem_set: 'ps',
+  homework: 'h'
 };
 
 // 实体类型 → 英文名词/404 文案：403 文案前端会原样 toast，必须是英文短句
@@ -25,7 +26,8 @@ const RESOURCE_NOUN = {
   problem: 'problem',
   contest: 'contest',
   exam: 'exam',
-  problem_set: 'problem set'
+  problem_set: 'problem set',
+  homework: 'homework'
 };
 
 function visibilityNotFoundMessage(resourceType) {

@@ -113,14 +113,27 @@ function insertVirtualContest(contestId, userId, startSeconds, endSeconds, statu
 // 提交行与多文件行必须同生共死：文件写入失败时不得留下缺文件的提交记录（事务内无 await，单连接不会被其他请求串入）
 // 失败 ROLLBACK 后 throw，由路由层的 try/catch 透传给 Express 错误中间件（与改造前一致）
 function insertSubmissionWithFiles(payload) {
-  const { userId, problemId, language, sourceCode, answerData, virtualContestId, examId, examAttempt, files } = payload;
+  const { userId, problemId, language, sourceCode, answerData, virtualContestId, examId, examAttempt,
+    homeworkId, homeworkQuestionId, homeworkAnswer, files } = payload;
   try {
     db.exec('BEGIN');
     const newId = db.findNextId('submissions');
-    db.prepare('INSERT INTO submissions (id, user_id, problem_id, language, source_code, answer_data, status, virtual_contest_id, exam_id, exam_attempt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+    db.prepare(`INSERT INTO submissions (id, user_id, problem_id, language, source_code, answer_data, status,
+      virtual_contest_id, exam_id, exam_attempt, homework_id, homework_question_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       newId, userId, problemId, language, sourceCode, answerData, 'pending_review', virtualContestId,
-      examId, examAttempt
+      examId, examAttempt, homeworkId || null, homeworkQuestionId || null
     );
+
+    // 作业编程题：与提交同事务写入作答行，判题完成后由 homeworkProgram.writeBackAfterJudge 回填得分
+    if (homeworkAnswer) {
+      db.prepare(`INSERT INTO homework_submissions (homework_id, question_id, user_id, attempt_no, answer, score,
+        max_score, is_correct, is_subjective, grading_status, code_submission_id)
+        VALUES (?, ?, ?, ?, ?, 0, ?, 0, 0, 'pending', ?)`).run(
+        homeworkAnswer.homeworkId, homeworkAnswer.questionId, userId, homeworkAnswer.attemptNo,
+        String(newId), homeworkAnswer.maxScore, newId
+      );
+    }
 
     // 写入多文件记录
     if (files.length > 0) {

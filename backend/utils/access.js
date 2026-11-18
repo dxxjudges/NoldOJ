@@ -28,7 +28,9 @@ const VIEW_TYPE_ALIASES = {
   problem_set: VIEW_TYPES.problem_set,
   problem_sets: VIEW_TYPES.problem_set,
   problemset: VIEW_TYPES.problem_set,
-  problemsets: VIEW_TYPES.problem_set
+  problemsets: VIEW_TYPES.problem_set,
+  homework: VIEW_TYPES.homework,
+  homeworks: VIEW_TYPES.homework
 };
 
 function viewTypeOf(name) {

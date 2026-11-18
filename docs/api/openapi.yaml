@@ -4398,6 +4398,372 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  # ===== HOMEWORKS =====
+  /homeworks:
+    get:
+      tags: [作业]
+      summary: 作业列表
+      description: 教师/管理员可见全部；普通用户仅见公开且未隐藏的作业，并按用户组可见性过滤。支持忽略空格的标题模糊搜索。
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 作业列表（total/page/limit/homeworks）
+    post:
+      tags: [作业]
+      summary: 创建作业（教师+）
+      description: |
+        必填 `title`；可选 `description`、`start_time`/`end_time`（可只设其一）、`pass_score`、
+        `is_public`、`is_hidden`、`leaderboard_enabled`、`stats_public` 与 `questions`。
+        每题支持 `max_submissions`（0=无限），编程题需关联公开、非隐藏的题库题目。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: 创建成功，返回作业对象
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: 需教师及以上（code 6）
+  /homeworks/{id}:
+    get:
+      tags: [作业]
+      summary: 作业详情
+      description: 教师视图含标准答案与待批改数量；学生视图按题返回提交次数、剩余次数、最高分与最近作答。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 作业详情（含 questions / window_state / server_now）
+        '403':
+          description: 隐藏或未公开，或作业尚未开始
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [作业]
+      summary: 编辑作业（教师+）
+      description: 字段同创建；传 `questions` 时按 id 增量替换，移除的题会级联清理其作答。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: 更新成功
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [作业]
+      summary: 删除作业（教师+）
+      description: 级联删除题目与作答，并解除关联代码提交的作业标记（提交记录保留）。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 删除成功
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /homeworks/{id}/visibility:
+    get:
+      tags: [作业]
+      summary: 查看作业可见性（任意登录用户）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 可见性设置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisibilityInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [作业]
+      summary: 设置作业可见性（仅 admin/su）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VisibilityPayload'
+      responses:
+        '200':
+          description: 设置成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisibilityInfo'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          description: 仅管理员可修改可见性（code 6）
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /homeworks/{id}/questions/{qid}/submit:
+    post:
+      tags: [作业]
+      summary: 逐题提交（客观题即时判分，主观题待批改）
+      description: |
+        编程题请改用 `POST /submissions` 并携带 `homework_id`/`homework_question_id`。
+        达到 `max_submissions` 返回 400 `ERR_MAX_SUBMISSIONS`；开考前/截止后对非教师 403。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [answer]
+              properties:
+                answer:
+                  type: string
+                  maxLength: 20000
+      responses:
+        '201':
+          description: 已提交，返回分数、尝试次数、剩余次数与批改状态
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: 不在时间窗内或作业不可见
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /homeworks/{id}/questions/{qid}/answers:
+    get:
+      tags: [作业]
+      summary: 查看某题作答（教师+）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, graded]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 作答列表
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: 需教师及以上（code 6）
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /homeworks/{id}/answers/{aid}/grade:
+    put:
+      tags: [作业]
+      summary: 批改主观题（教师+）
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: aid
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [score]
+              properties:
+                score:
+                  type: number
+                  minimum: 0
+                comment:
+                  type: string
+                  maxLength: 2000
+      responses:
+        '200':
+          description: 批改成功，返回更新后的作答
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /homeworks/{id}/grading:
+    get:
+      tags: [作业]
+      summary: 待批改总览（教师+）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, all]
+      responses:
+        '200':
+          description: 待批改作答列表
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: 需教师及以上（code 6）
+  /homeworks/{id}/leaderboard:
+    get:
+      tags: [作业]
+      summary: 作业排行榜
+      description: 每人每题取最高分求和；同分按最后提交早者靠前；关闭排行榜时 404。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 200
+      responses:
+        '200':
+          description: 排行榜（leaderboard / my）
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /homeworks/{id}/stats:
+    get:
+      tags: [作业]
+      summary: 作业统计
+      description: 教师/管理员始终可看；stats_public=1 时学生可看。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 汇总统计与逐题统计
+        '403':
+          description: 统计未公开（code 6）
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /homeworks/{id}/export.csv:
+    get:
+      tags: [作业]
+      summary: 导出作业成绩 CSV
+      description: scope=all（仅教师）导出全员总表；scope=mine（默认）导出本人逐题明细。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: scope
+          in: query
+          schema:
+            type: string
+            enum: [all, mine]
+      responses:
+        '200':
+          description: CSV 文件（text/csv; charset=utf-8，带 UTF-8 BOM）
+          content:
+            text/csv:
+              schema:
+                type: string
+        '403':
+          description: 学生请求 scope=all（code 6）
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   # ===== SYSTEM =====
   /system/status:
     get:

@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>编辑作业 - NoldOJ</title>
+  <script src="/js/tailwind.js"></script>
+  <script>tailwind.config={darkMode:'class'}</script>
+  <script src="/js/api.js"></script>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
+  <div id="nav"></div>
+  <div class="max-w-4xl mx-auto px-4 py-8">
+    <div class="flex items-center justify-between mb-6">
+      <h1 id="pageTitle" class="text-2xl font-bold text-gray-900 dark:text-white">创建作业</h1>
+      <a href="/pages/homeworks.html" class="text-sm text-indigo-600 dark:text-indigo-400 hover:underline">← 返回作业列表</a>
+    </div>
+
+    <div id="form" class="space-y-5">
+      <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6 space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">标题 *</label>
+          <input id="title" type="text" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-900 dark:text-white" placeholder="例如：第 3 章 循环结构练习">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">说明（支持 Markdown）</label>
+          <textarea id="description" rows="4" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-900 dark:text-white" placeholder="作业要求、注意事项..."></textarea>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">开始时间</label>
+            <input id="start_time" type="datetime-local" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-900 dark:text-white">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">截止时间</label>
+            <input id="end_time" type="datetime-local" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-900 dark:text-white">
+          </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">及格分</label>
+            <input id="pass_score" type="number" min="0" step="1" value="0" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-900 dark:text-white">
+          </div>
+          <div class="flex flex-wrap items-center gap-4 pt-6">
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input id="is_public" type="checkbox" checked> 公开</label>
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input id="is_hidden" type="checkbox"> 隐藏</label>
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input id="leaderboard_enabled" type="checkbox" checked> 排行榜</label>
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300"><input id="stats_public" type="checkbox"> 统计公开</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-bold text-gray-900 dark:text-white">题目</h2>
+        <div class="flex gap-2">
+          <select id="addType" aria-label="新增题型" class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-800 dark:text-white">
+            <option value="choice">选择题</option>
+            <option value="true_false">判断题</option>
+            <option value="fill_blank">填空题</option>
+            <option value="long_answer">大题</option>
+            <option value="program">编程题</option>
+          </select>
+          <button onclick="addQuestion()" class="px-4 py-2 text-sm bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700">+ 添加题目</button>
+        </div>
+      </div>
+      <div id="questions" class="space-y-4"></div>
+
+      <div class="flex justify-end gap-3 pb-10">
+        <a href="/pages/homeworks.html" class="px-5 py-2.5 text-sm border border-gray-300 dark:border-gray-600 rounded-xl text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700">取消</a>
+        <button onclick="save()" class="px-6 py-2.5 text-sm bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700">保存作业</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    const editId = new URLSearchParams(window.location.search).get('id');
+    const user = getUser();
+    const staff = !!(user && ['teacher', 'admin', 'su'].includes(user.role));
+    let questions = [];
+
+    document.getElementById('nav').innerHTML = renderNav('homeworks');
+
+    const TYPE_LABEL = { choice: '选择题', true_false: '判断题', fill_blank: '填空题', long_answer: '大题', program: '编程题' };
+
+    if (!staff) {
+      document.getElementById('form').innerHTML = '<p class="text-red-500">仅教师及以上角色可以创建作业。</p>';
+    }
+
+    function toLocalInput(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return '';
+      const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+      return local.toISOString().slice(0, 16);
+    }
+    function toIso(v) {
+      return v ? new Date(v).toISOString() : null;
+    }
+    function esc(v) { return escapeHtml(v == null ? '' : String(v)); }
+
+    function newQuestion(type) {
+      return {
+        question_type: type, title: '', score: 10, max_submissions: 0,
+        options: ['', ''], correct_answer: '', is_subjective: 0, problem_id: null, problem_title: ''
+      };
+    }
+
+    function addQuestion() {
+      questions.push(newQuestion(document.getElementById('addType').value));
+      renderQuestions();
+    }
+    function removeQuestion(i) {
+      questions.splice(i, 1);
+      renderQuestions();
+    }
+    function setField(i, field, value) {
+      questions[i][field] = value;
+    }
+    function setOptions(i, text) {
+      questions[i].options = text.split('\n').map(s => s.trim()).filter(Boolean);
+    }
+    function changeType(i, type) {
+      const keep = questions[i];
+      questions[i] = Object.assign(newQuestion(type), {
+        id: keep.id, title: keep.title, score: keep.score, max_submissions: keep.max_submissions,
+        problem_id: keep.problem_id, problem_title: keep.problem_title, is_subjective: keep.is_subjective
+      });
+      renderQuestions();
+    }
+
+    function renderQuestions() {
+      const wrap = document.getElementById('questions');
+      if (questions.length === 0) {
+        wrap.innerHTML = '<p class="text-sm text-gray-400">还没有题目，先添加一道吧。</p>';
+        return;
+      }
+      wrap.innerHTML = questions.map((q, i) => {
+        let extra = '';
+        if (q.question_type === 'choice') {
+          extra = `
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">选项（每行一个）</label>
+                <textarea oninput="setOptions(${i}, this.value)" rows="4" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-900 dark:text-white">${esc((q.options || []).join('\n'))}</textarea>
+              </div>
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">正确答案（如 A）</label>
+                <input value="${esc(q.correct_answer)}" oninput="setField(${i}, 'correct_answer', this.value.toUpperCase())" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-900 dark:text-white">
+              </div>
+            </div>`;
+        } else if (q.question_type === 'true_false') {
+          extra = `<div>
+            <label class="block text-xs text-gray-500 mb-1">正确答案</label>
+            <select onchange="setField(${i}, 'correct_answer', this.value)" class="px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-900 dark:text-white">
+              <option value="true" ${q.correct_answer === 'true' ? 'selected' : ''}>正确</option>
+              <option value="false" ${q.correct_answer === 'false' ? 'selected' : ''}>错误</option>
+            </select>
+          </div>`;
+        } else if (q.question_type === 'fill_blank') {
+          extra = `<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">标准答案（自动判分时必填）</label>
+              <input value="${esc(q.correct_answer)}" oninput="setField(${i}, 'correct_answer', this.value)" ${q.is_subjective ? 'disabled' : ''} class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-900 dark:text-white disabled:opacity-50">
+            </div>
+            <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 sm:mt-6">
+              <input type="checkbox" ${q.is_subjective ? 'checked' : ''} onchange="setField(${i}, 'is_subjective', this.checked ? 1 : 0); renderQuestions()"> 教师人工批改
+            </label>
+          </div>`;
+        } else if (q.question_type === 'long_answer') {
+          extra = '<p class="text-xs text-gray-500">大题默认由教师人工批改。</p>';
+        } else if (q.question_type === 'program') {
+          extra = `<div class="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+            <div class="sm:col-span-2">
+              <label class="block text-xs text-gray-500 mb-1">关联题库题目 ID</label>
+              <input id="pid_${i}" type="number" min="1" value="${q.problem_id || ''}" oninput="setField(${i}, 'problem_id', this.value ? parseInt(this.value, 10) : null)" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-900 dark:text-white">
+              <div class="text-xs text-gray-500 mt-1">${q.problem_title ? '当前：' + esc(q.problem_title) : '需为公开、非隐藏的普通题目'}</div>
+            </div>
+            <div class="flex gap-2">
+              <input id="ps_${i}" type="text" placeholder="按标题搜索" class="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-900 dark:text-white">
+              <button onclick="searchProblem(${i})" class="px-3 py-2 text-sm bg-gray-100 dark:bg-gray-700 rounded-xl">搜索</button>
+            </div>
+            <div id="pres_${i}" class="sm:col-span-3"></div>
+          </div>`;
+        }
+        return `<div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-5">
+          <div class="flex items-center justify-between gap-3 mb-3">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-semibold text-gray-400">第 ${i + 1} 题</span>
+              <select onchange="changeType(${i}, this.value)" aria-label="题型" class="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-900 dark:text-white">
+                ${Object.keys(TYPE_LABEL).map(t => `<option value="${t}" ${t === q.question_type ? 'selected' : ''}>${TYPE_LABEL[t]}</option>`).join('')}
+              </select>
+            </div>
+            <button onclick="removeQuestion(${i})" class="text-xs text-red-500 hover:underline">删除</button>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs text-gray-500 mb-1">题干（支持 Markdown）*</label>
+              <textarea oninput="setField(${i}, 'title', this.value)" rows="2" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-900 dark:text-white">${esc(q.title)}</textarea>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">分值</label>
+                <input type="number" min="0" step="0.5" value="${q.score}" oninput="setField(${i}, 'score', Number(this.value) || 0)" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-900 dark:text-white">
+              </div>
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">最大提交次数（0=无限）</label>
+                <input type="number" min="0" step="1" value="${q.max_submissions}" oninput="setField(${i}, 'max_submissions', parseInt(this.value, 10) || 0)" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-900 dark:text-white">
+              </div>
+            </div>
+            ${extra}
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    async function searchProblem(i) {
+      const kw = document.getElementById(`ps_${i}`).value.trim();
+      const box = document.getElementById(`pres_${i}`);
+      try {
+        const data = await apiCall('GET', `/problems?page=1&limit=8&search=${encodeURIComponent(kw)}`);
+        const list = data.problems || [];
+        if (list.length === 0) {
+          box.innerHTML = '<p class="text-xs text-gray-400">没有匹配的公开题目</p>';
+          return;
+        }
+        box.innerHTML = `<div class="flex flex-wrap gap-2">${list.map(p => `<button type="button" onclick="pickProblem(${i}, ${p.id}, '${esc(p.title).replace(/'/g, "\\'")}')" class="px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/30">#${p.id} ${esc(p.title)}</button>`).join('')}</div>`;
+      } catch (err) {
+        box.innerHTML = `<p class="text-xs text-red-500">${esc(err.message)}</p>`;
+      }
+    }
+    function pickProblem(i, id, title) {
+      questions[i].problem_id = id;
+      questions[i].problem_title = title;
+      renderQuestions();
+    }
+
+    async function loadEdit() {
+      try {
+        const hw = await apiCall('GET', `/homeworks/${editId}`);
+        document.getElementById('pageTitle').textContent = '编辑作业';
+        document.title = '编辑作业 - NoldOJ';
+        document.getElementById('title').value = hw.title || '';
+        document.getElementById('description').value = hw.description || '';
+        document.getElementById('start_time').value = toLocalInput(hw.start_time);
+        document.getElementById('end_time').value = toLocalInput(hw.end_time);
+        document.getElementById('pass_score').value = hw.pass_score || 0;
+        document.getElementById('is_public').checked = !!hw.is_public;
+        document.getElementById('is_hidden').checked = !!hw.is_hidden;
+        document.getElementById('leaderboard_enabled').checked = !!hw.leaderboard_enabled;
+        document.getElementById('stats_public').checked = !!hw.stats_public;
+        questions = (hw.questions || []).map(q => ({
+          id: q.id,
+          question_type: q.question_type,
+          title: q.title,
+          score: q.score,
+          max_submissions: q.max_submissions || 0,
+          options: (() => { try { return JSON.parse(q.options || '[]'); } catch { return []; } })(),
+          correct_answer: q.correct_answer || '',
+          is_subjective: q.is_subjective || 0,
+          problem_id: q.problem_id || null,
+          problem_title: q.problem ? q.problem.title : ''
+        }));
+        renderQuestions();
+      } catch (err) {
+        showToast(err.message || '加载失败', 'error');
+      }
+    }
+
+    async function save() {
+      if (!staff) return;
+      const title = document.getElementById('title').value.trim();
+      if (!title) return showToast('请填写标题', 'error');
+      const payload = {
+        title,
+        description: document.getElementById('description').value,
+        start_time: toIso(document.getElementById('start_time').value),
+        end_time: toIso(document.getElementById('end_time').value),
+        pass_score: Number(document.getElementById('pass_score').value) || 0,
+        is_public: document.getElementById('is_public').checked,
+        is_hidden: document.getElementById('is_hidden').checked,
+        leaderboard_enabled: document.getElementById('leaderboard_enabled').checked,
+        stats_public: document.getElementById('stats_public').checked,
+        questions
+      };
+      try {
+        if (editId) {
+          await apiCall('PUT', `/homeworks/${editId}`, payload);
+          showToast('已保存', 'success');
+          window.location.href = `/pages/homework.html?id=${editId}`;
+        } else {
+          const created = await apiCall('POST', '/homeworks', payload);
+          showToast('作业已创建', 'success');
+          window.location.href = `/pages/homework.html?id=${created.id}`;
+        }
+      } catch (err) {
+        showToast(err.message || '保存失败', 'error');
+      }
+    }
+
+    if (staff && editId) loadEdit();
+  </script>
+</body>
+</html>

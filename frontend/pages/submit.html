@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+﻿﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
@@ -57,6 +57,8 @@
     const pid = params.get('id');
     const vcId = params.get('vc');
     const contestId = params.get('contest_id');
+    const homeworkId = params.get('hw');
+    const homeworkQId = params.get('hq');
     let editor;
     let problemData = null;
 
@@ -209,8 +211,17 @@
         } else if (contestId) {
           submitData.contest_id = parseInt(contestId);
         }
+        // Include homework context if present（逐题提交，判题完成后回填作业得分）
+        if (homeworkId) {
+          submitData.homework_id = parseInt(homeworkId);
+          submitData.homework_question_id = parseInt(homeworkQId);
+        }
         const data = await apiCall('POST', '/submissions', submitData);
-        window.location.href = `/pages/submission.html?id=${data.submission_id}`;
+        if (homeworkId) {
+          window.location.href = `/pages/submission.html?id=${data.submission_id}&hw=${homeworkId}`;
+        } else {
+          window.location.href = `/pages/submission.html?id=${data.submission_id}`;
+        }
       } catch (err) {
         showError('error', err.message || '提交失败');
         btn.disabled = false; btn.textContent = '提交';

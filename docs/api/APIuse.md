@@ -482,6 +482,8 @@ multipart/form-data，字段名 `files`，文件命名 `name.in`/`name.out`。
 
 **比赛提交**：从比赛页面提交时传入 `contest_id` 参数，提交将自动纳入该比赛排行。系统会自动检查比赛状态、题目归属，并自动加入比赛（如未加入）。
 
+**作业提交**：从作业页面提交编程题时传入 `homework_id` 与 `homework_question_id`，提交会写入作答记录并纳入作业成绩。服务端校验：作业可见性与时间窗、题目属于该作业且为编程题、`problem_id` 与作业题目一致、未超过该题最大提交次数（`max_submissions`，0=无限）；作业题不支持与 `contest_id`/`virtual_contest_id` 混用。判题完成后自动按测试点比例折算为该题得分（见「11.55 作业模块」）。
+
 **提交流程：**
 1. 创建提交记录，状态为 `pending_review`
 2. 立即返回 `submission_id`
@@ -1471,6 +1473,75 @@ PAT 调用需要 `account` scope。
 - `scope=mine`（学生默认）：本人最佳一次尝试的成绩单，含汇总行与逐题明细（序号、题目、题型、满分、得分、是否正确、批改状态）；未交卷返回 404。教师显式传 `scope=mine` 也可导出本人成绩单。
 
 问卷（`is_survey=1`）没有成绩单，返回 404。响应为 `text/csv; charset=utf-8`，带 UTF-8 BOM 与 `Content-Disposition` 下载头。
+
+## 11.55 作业模块 `/homeworks`
+
+作业与试卷的区别：作业**逐题提交、逐题判分**，不做「一次性交卷」；题型与试卷一致（choice / true_false / fill_blank / long_answer / program），每道题可单独限制提交次数（`max_submissions`，默认 `0` = 无限）。成绩口径：每人每题取最高分，总分 = 各题最高分之和；仅 `role=user` 进入排行榜。
+
+### GET /homeworks — 作业列表
+
+可选认证。教师/管理员可见全部（含隐藏/私有）；普通用户仅见 `is_public=1 AND is_hidden=0`。支持 `page`、`limit`、`search`（忽略空格模糊匹配标题）与用户组可见性过滤。
+
+### POST /homeworks — 创建作业
+
+需教师及以上。必填 `title`；可选 `description`、`start_time`、`end_time`（ISO8601，可只设其一，同时设置时截止须晚于开始）、`pass_score`、`is_public`、`is_hidden`、`leaderboard_enabled`（默认 1）、`stats_public`（默认 0）与 `questions` 数组。
+
+每道题字段：`question_type`、`title`、`score`、`sort_order`、`is_subjective`、`max_submissions`（0=无限）、`correct_answer`（客观题必填）、`options`（选择题 ≥2 项），编程题另需 `problem_id`。
+
+编程题只能关联**公开、非隐藏、未归档**的题库题目（否则 400）。创建成功后自动计算 `total_score`。
+
+### GET /homeworks/:id — 作业详情
+
+可选认证。隐藏作业对非教师返回 403；开考前对非教师返回 403「作业尚未开始。」。教师视图包含标准答案、编程题题目信息与 `pending_grading`（待批改数量）；学生视图不下发 `correct_answer`，并按题返回 `attempts_used`、`remaining`（null=无限）、`my_best_score`、`my_last_answer`、`my_last_status`、`my_comment`，附 `window_state`（null/not_started/running/ended）与 `server_now`。
+
+### PUT /homeworks/:id — 编辑作业
+
+需教师及以上。字段同创建（传 `questions` 时按 id 增量替换：保留的题保留作答，移除的题级联清理其作答）。`start_time`/`end_time` 传 `null` 表示清除。
+
+### DELETE /homeworks/:id — 删除作业
+
+需教师及以上。级联删除题目与作答，并把关联代码提交的 `homework_id`/`homework_question_id` 置空（提交记录本身保留）。
+
+### GET /homeworks/:id/visibility — 读取作业可见性
+
+需认证。返回 `{ visibility, groups }`。
+
+### PUT /homeworks/:id/visibility — 设置作业可见性
+
+需 admin/su。请求体 `{ "visibility": "public" | "groups", "group_ids": [1, 2] }`。
+
+### POST /homeworks/:id/questions/:qid/submit — 逐题提交
+
+需认证，且在作业时间窗内（开考前/截止后对非教师 403）。请求体 `{ "answer": "..." }`（≤20000 字符）。编程题请改用 `POST /submissions` 携带 `homework_id`/`homework_question_id`。
+
+- 选择题答案须为有效选项字母；判断题接受 `true`/`false`（与「正确/错误」归一化比对）。
+- 客观题（选择/判断/非主观填空）立即判分并写 `grading_status='graded'`；主观题（大题、勾选人工批改的填空）写 `pending` 等待教师批改。
+- 达到 `max_submissions` 后返回 400 `ERR_MAX_SUBMISSIONS`；教师/管理员不受次数与时间窗限制（便于测试）。
+- 返回 `{ answer_id, attempt_no, attempts_used, remaining, score, max_score, is_correct, grading_status }`。
+
+### GET /homeworks/:id/questions/:qid/answers — 查看某题作答
+
+需教师及以上。`?status=pending|graded`、`?limit=`、`?offset=`；返回作答行、作答用户、分数与状态。
+
+### PUT /homeworks/:id/answers/:aid/grade — 批改主观题
+
+需教师及以上。请求体 `{ "score": 18, "comment": "思路正确" }`；`score` 须在 0 到该题满分之间，客观题不可批改（400）。
+
+### GET /homeworks/:id/grading — 待批改总览
+
+需教师及以上。默认只返回主观题中 `grading_status='pending'` 的作答；`?status=all` 返回全部主观题作答。
+
+### GET /homeworks/:id/leaderboard — 排行榜
+
+可选认证；`leaderboard_enabled=0` 返回 404。`?limit=` 默认 100、上限 200。每人每题取最高分求和，总分降序、同分按最后提交时间早者靠前，返回 `leaderboard` 与 `my`。
+
+### GET /homeworks/:id/stats — 数据统计
+
+可选认证。教师/管理员始终可看；`stats_public=1` 时学生也可看（否则 403）。返回参与人数、提交次数、平均/中位/最高/最低分、满分与及格人数、11 档分数分布，以及逐题作答人数/平均最高分/满分人数/正确率/待批改人数。
+
+### GET /homeworks/:id/export.csv — 导出 CSV
+
+可选认证。`scope=all`（仅教师）导出全员总表；`scope=mine`（默认）导出本人逐题明细。响应为 `text/csv; charset=utf-8`，带 UTF-8 BOM 与下载头。
 
 ## 11.6 系统状态 `/system`
 

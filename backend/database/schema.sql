@@ -137,6 +137,8 @@ CREATE TABLE IF NOT EXISTS submissions (
   virtual_contest_id INTEGER,
   exam_id INTEGER,        -- 非空 = 试卷考试提交（全站记录/统计/成就隔离）
   exam_attempt INTEGER DEFAULT 0, -- 所属考试尝试次数（从 1 起），同尝试每题仅 1 次
+  homework_id INTEGER,    -- 非空 = 作业编程题提交
+  homework_question_id INTEGER, -- 所属作业题目（homework_questions.id）
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (user_id) REFERENCES users(id),
   FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE
@@ -624,6 +626,78 @@ CREATE TABLE IF NOT EXISTS exam_survey_answers (
 CREATE INDEX IF NOT EXISTS idx_exam_survey_answers_exam ON exam_survey_answers(exam_id, question_id);
 
 -- ═══════════════════════════════════════════════════════
+-- 作业系统（逐题提交、逐题判分，独立于试卷）
+-- ═══════════════════════════════════════════════════════
+
+-- 作业：教师创建的题目集合，题型与试卷一致
+CREATE TABLE IF NOT EXISTS homeworks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  description TEXT DEFAULT '',
+  start_time TEXT,                 -- 开始时间（ISO8601，NULL=不限）
+  end_time TEXT,                   -- 截止时间（NULL=不限，且不参与自动封榜）
+  total_score REAL DEFAULT 0,      -- 总分（自动计算）
+  pass_score REAL DEFAULT 0,       -- 及格分
+  is_public INTEGER DEFAULT 1,
+  is_hidden INTEGER DEFAULT 0,
+  visibility TEXT NOT NULL DEFAULT 'public' CHECK(visibility IN ('public','groups')),
+  leaderboard_enabled INTEGER DEFAULT 1,
+  stats_public INTEGER DEFAULT 0,  -- 统计公开：1=学生可看聚合统计
+  creator_id INTEGER NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- 作业题目：每题可单独设定最大提交次数（0=无限）
+CREATE TABLE IF NOT EXISTS homework_questions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  homework_id INTEGER NOT NULL,
+  question_type TEXT NOT NULL CHECK(question_type IN ('choice','true_false','fill_blank','long_answer','program')),
+  title TEXT NOT NULL,
+  options TEXT DEFAULT '[]',       -- 选择题选项，JSON 数组
+  correct_answer TEXT DEFAULT '',  -- 客观题标准答案
+  score REAL DEFAULT 0,
+  sort_order INTEGER DEFAULT 0,
+  is_subjective INTEGER DEFAULT 0, -- 填空/大题：0=客观自动判分，1=教师批改
+  max_submissions INTEGER DEFAULT 0, -- 每题最大提交次数，0=无限
+  problem_id INTEGER,              -- program 题关联的题库题目
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (homework_id) REFERENCES homeworks(id) ON DELETE CASCADE,
+  FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE
+);
+
+-- 作业作答记录：一行=某学生某题的一次提交
+CREATE TABLE IF NOT EXISTS homework_submissions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  homework_id INTEGER NOT NULL,
+  question_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  attempt_no INTEGER NOT NULL DEFAULT 1,
+  answer TEXT DEFAULT '',
+  score REAL DEFAULT 0,
+  max_score REAL DEFAULT 0,
+  is_correct INTEGER DEFAULT 0,
+  is_subjective INTEGER DEFAULT 0,
+  grading_status TEXT DEFAULT 'pending' CHECK(grading_status IN ('pending','graded')),
+  comment TEXT DEFAULT '',         -- 教师批语
+  code_submission_id INTEGER,      -- program 题关联的代码提交（判题完成后回填得分）
+  submitted_at TEXT DEFAULT (datetime('now')),
+  graded_at TEXT,
+  graded_by INTEGER,
+  FOREIGN KEY (homework_id) REFERENCES homeworks(id) ON DELETE CASCADE,
+  FOREIGN KEY (question_id) REFERENCES homework_questions(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (graded_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_homeworks_creator ON homeworks(creator_id);
+CREATE INDEX IF NOT EXISTS idx_homework_questions_hw ON homework_questions(homework_id);
+CREATE INDEX IF NOT EXISTS idx_homework_submissions_hw ON homework_submissions(homework_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_homework_submissions_q ON homework_submissions(question_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_homework_submissions_code ON homework_submissions(code_submission_id);
+
+-- ═══════════════════════════════════════════════════════
 -- 用户组与实体可见性
 -- ═══════════════════════════════════════════════════════
 
@@ -651,7 +725,7 @@ CREATE INDEX IF NOT EXISTS idx_user_groups_group ON user_groups(group_id);
 
 -- 实体与组的可见性绑定（实体 visibility='groups' 时才生效）
 CREATE TABLE IF NOT EXISTS resource_group_access (
-  resource_type TEXT NOT NULL CHECK(resource_type IN ('problem','contest','exam','problem_set')),
+  resource_type TEXT NOT NULL CHECK(resource_type IN ('problem','contest','exam','problem_set','homework')),
   resource_id INTEGER NOT NULL,
   group_id INTEGER NOT NULL,
   PRIMARY KEY (resource_type, resource_id, group_id)

@@ -284,7 +284,9 @@ describe('用户组与实体可见性（内核层）', () => {
     assert.equal(access.viewTypeOf('contests'), 'contest');
     assert.equal(access.viewTypeOf('articles'), null);
     assert.equal(access.tableForType('exam'), 'exams');
-    assert.deepEqual(access.RESOURCE_TYPES, ['problem', 'contest', 'exam', 'problem_set']);
+    assert.equal(access.viewTypeOf('homeworks'), 'homework');
+    assert.equal(access.tableForType('homework'), 'homeworks');
+    assert.deepEqual(access.RESOURCE_TYPES, ['problem', 'contest', 'exam', 'problem_set', 'homework']);
     assert.deepEqual(access.RESOURCE_TYPES, resourceAccess.RESOURCE_TYPES, '资源类型单点定义，勿两处漂移');
     assert.equal(resourceAccess.RESOURCE_TABLES.problem_set, 'problem_sets');
   });

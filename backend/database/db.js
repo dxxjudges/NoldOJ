@@ -267,6 +267,82 @@ async function initDB() {
   if (!exCols.includes('is_survey')) sqlDb.exec("ALTER TABLE exams ADD COLUMN is_survey INTEGER DEFAULT 0");
   if (!exCols.includes('is_anonymous')) sqlDb.exec("ALTER TABLE exams ADD COLUMN is_anonymous INTEGER DEFAULT 0");
 
+  // ═══ 作业系统（homeworks）迁移 ═══
+  // 新库由 schema.sql 建表；老库在此补齐表与 submissions 关联列。
+  // 作业提交复用 submissions 表，homework_id 非空即代表该代码提交属于某次作业。
+  const subHwCols = tableCols('submissions');
+  if (!subHwCols.includes('homework_id')) sqlDb.exec('ALTER TABLE submissions ADD COLUMN homework_id INTEGER');
+  if (!subHwCols.includes('homework_question_id')) sqlDb.exec('ALTER TABLE submissions ADD COLUMN homework_question_id INTEGER');
+  sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_submissions_homework ON submissions(homework_id, user_id)');
+
+  if (!tableExists('homeworks')) {
+    sqlDb.exec(`CREATE TABLE IF NOT EXISTS homeworks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      start_time TEXT,
+      end_time TEXT,
+      total_score REAL DEFAULT 0,
+      pass_score REAL DEFAULT 0,
+      is_public INTEGER DEFAULT 1,
+      is_hidden INTEGER DEFAULT 0,
+      visibility TEXT NOT NULL DEFAULT 'public' CHECK(visibility IN ('public','groups')),
+      leaderboard_enabled INTEGER DEFAULT 1,
+      stats_public INTEGER DEFAULT 0,
+      creator_id INTEGER NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (creator_id) REFERENCES users(id) ON DELETE CASCADE
+    )`);
+  }
+  if (!tableExists('homework_questions')) {
+    sqlDb.exec(`CREATE TABLE IF NOT EXISTS homework_questions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      homework_id INTEGER NOT NULL,
+      question_type TEXT NOT NULL CHECK(question_type IN ('choice','true_false','fill_blank','long_answer','program')),
+      title TEXT NOT NULL,
+      options TEXT DEFAULT '[]',
+      correct_answer TEXT DEFAULT '',
+      score REAL DEFAULT 0,
+      sort_order INTEGER DEFAULT 0,
+      is_subjective INTEGER DEFAULT 0,
+      max_submissions INTEGER DEFAULT 0,
+      problem_id INTEGER,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (homework_id) REFERENCES homeworks(id) ON DELETE CASCADE,
+      FOREIGN KEY (problem_id) REFERENCES problems(id) ON DELETE CASCADE
+    )`);
+  }
+  if (!tableExists('homework_submissions')) {
+    sqlDb.exec(`CREATE TABLE IF NOT EXISTS homework_submissions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      homework_id INTEGER NOT NULL,
+      question_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      attempt_no INTEGER NOT NULL DEFAULT 1,
+      answer TEXT DEFAULT '',
+      score REAL DEFAULT 0,
+      max_score REAL DEFAULT 0,
+      is_correct INTEGER DEFAULT 0,
+      is_subjective INTEGER DEFAULT 0,
+      grading_status TEXT DEFAULT 'pending' CHECK(grading_status IN ('pending','graded')),
+      comment TEXT DEFAULT '',
+      code_submission_id INTEGER,
+      submitted_at TEXT DEFAULT (datetime('now')),
+      graded_at TEXT,
+      graded_by INTEGER,
+      FOREIGN KEY (homework_id) REFERENCES homeworks(id) ON DELETE CASCADE,
+      FOREIGN KEY (question_id) REFERENCES homework_questions(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (graded_by) REFERENCES users(id) ON DELETE SET NULL
+    )`);
+  }
+  sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_homeworks_creator ON homeworks(creator_id)');
+  sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_homework_questions_hw ON homework_questions(homework_id)');
+  sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_homework_submissions_hw ON homework_submissions(homework_id, user_id)');
+  sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_homework_submissions_q ON homework_submissions(question_id, user_id)');
+  sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_homework_submissions_code ON homework_submissions(code_submission_id)');
+
   const ideCols = tableCols('ide_runs');
   if (!ideCols.includes('status')) sqlDb.exec("ALTER TABLE ide_runs ADD COLUMN status TEXT DEFAULT 'pending'");
   if (!ideCols.includes('compile_output')) sqlDb.exec("ALTER TABLE ide_runs ADD COLUMN compile_output TEXT DEFAULT ''");
@@ -611,7 +687,7 @@ async function initDB() {
       PRIMARY KEY (user_id, group_id)
     )`);
     sqlDb.exec(`CREATE TABLE IF NOT EXISTS resource_group_access (
-      resource_type TEXT NOT NULL CHECK(resource_type IN ('problem','contest','exam','problem_set')),
+      resource_type TEXT NOT NULL CHECK(resource_type IN ('problem','contest','exam','problem_set','homework')),
       resource_id INTEGER NOT NULL,
       group_id INTEGER NOT NULL,
       PRIMARY KEY (resource_type, resource_id, group_id)
@@ -626,6 +702,23 @@ async function initDB() {
   sqlDb.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_all_users ON groups(kind) WHERE kind=\'all_users\'');
   sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_user_groups_group ON user_groups(group_id)');
   sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_rga_resource ON resource_group_access(resource_type, resource_id)');
+  // 老库升级：resource_group_access 的 CHECK 早于 homework 类型，SQLite 无法修改 CHECK，
+  // 只能原子重建（复制数据 → 换新表）。新库 schema.sql 已是新 CHECK，此处自动跳过。
+  {
+    const rgaDef = sqlDb.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='resource_group_access'").get();
+    if (rgaDef && rgaDef.sql && !rgaDef.sql.includes('homework')) {
+      sqlDb.exec('ALTER TABLE resource_group_access RENAME TO resource_group_access_old');
+      sqlDb.exec(`CREATE TABLE resource_group_access (
+        resource_type TEXT NOT NULL CHECK(resource_type IN ('problem','contest','exam','problem_set','homework')),
+        resource_id INTEGER NOT NULL,
+        group_id INTEGER NOT NULL,
+        PRIMARY KEY (resource_type, resource_id, group_id)
+      )`);
+      sqlDb.exec('INSERT OR IGNORE INTO resource_group_access (resource_type, resource_id, group_id) SELECT resource_type, resource_id, group_id FROM resource_group_access_old');
+      sqlDb.exec('DROP TABLE resource_group_access_old');
+      sqlDb.exec('CREATE INDEX IF NOT EXISTS idx_rga_resource ON resource_group_access(resource_type, resource_id)');
+    }
+  }
   sqlDb.exec(`CREATE TRIGGER IF NOT EXISTS trg_users_default_groups AFTER INSERT ON users
     BEGIN
       INSERT OR IGNORE INTO groups (name, description, kind, owner_id, created_at) VALUES (NEW.username, '个人组', 'personal', NEW.id, datetime('now'));

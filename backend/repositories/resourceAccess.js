@@ -7,7 +7,8 @@ const RESOURCE_TABLES = {
   problem: 'problems',
   contest: 'contests',
   exam: 'exams',
-  problem_set: 'problem_sets'
+  problem_set: 'problem_sets',
+  homework: 'homeworks'
 };
 
 const RESOURCE_TYPES = Object.keys(RESOURCE_TABLES);

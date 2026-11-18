@@ -2,6 +2,7 @@ const db = require('../../database/db');
 const { emitJudgeStatus, emitContestRanking } = require('../socket');
 const { checkAchievements } = require('../achievements');
 const examProgram = require('../examProgram');
+const homeworkProgram = require('../homeworkProgram');
 const { evaluateTestCases } = require('./runner');
 const { logWarn, logError } = require('../../utils/logger');
 
@@ -51,6 +52,12 @@ async function judgeSubmission(submissionId) {
         logError('JUDGE', `试卷答题回填失败 (submission ${submissionId}): ${e && e.message}`);
       }
     }
+    // 作业编程题回填：无测试点也按 0 分收敛，避免作答行长期 pending
+    if (submission.homework_id) {
+      try { homeworkProgram.writeBackAfterJudge(submissionId); } catch (e) {
+        logError('JUDGE', `作业答题回填失败 (submission ${submissionId}): ${e && e.message}`);
+      }
+    }
     return;
   }
 
@@ -63,6 +70,15 @@ async function judgeSubmission(submissionId) {
 
     // 推送最终评测状态
     emitJudgeStatus(submissionId, submission.user_id, updated.status);
+
+    // 作业编程题：回填本次作答得分（作业提交仍正常计入成就/通知/统计）
+    if (submission.homework_id) {
+      try {
+        homeworkProgram.writeBackAfterJudge(submissionId);
+      } catch (e) {
+        logError('JUDGE', `作业答题回填失败 (submission ${submissionId}): ${e && e.message}`);
+      }
+    }
 
     // 试卷编程题：回填 exam_answers 折算分并重算试卷提交总分（状态同步为 graded）
     if (problem.exam_id) {

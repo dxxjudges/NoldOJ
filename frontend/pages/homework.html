@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>作业详情 - NoldOJ</title>
+  <script src="/js/tailwind.js"></script>
+  <script>tailwind.config={darkMode:'class'}</script>
+  <script src="/js/katex/katex.min.js"></script>
+  <script src="/js/katex/auto-render.min.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/purify.min.js"></script>
+  <script src="/js/markdown.js"></script>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 min-h-screen">
+  <div id="nav"></div>
+  <div class="max-w-5xl mx-auto px-4 py-8">
+    <div id="header" class="mb-6">加载中...</div>
+    <div id="questions" class="space-y-4"></div>
+
+    <div id="leaderboardSection" class="mt-10 hidden">
+      <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-3">🏆 排行榜</h2>
+      <div id="leaderboard" class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 overflow-x-auto"></div>
+    </div>
+
+    <div id="statsSection" class="mt-10 hidden">
+      <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-3">📊 统计</h2>
+      <div id="stats" class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-5"></div>
+    </div>
+
+    <div id="gradingSection" class="mt-10 hidden">
+      <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-3">✍️ 待批改</h2>
+      <div id="grading" class="space-y-3"></div>
+    </div>
+  </div>
+  <script>
+    const hwId = new URLSearchParams(window.location.search).get('id');
+    const user = getUser();
+    const staff = !!(user && ['teacher', 'admin', 'su'].includes(user.role));
+    const TYPE_LABEL = { choice: '选择题', true_false: '判断题', fill_blank: '填空题', long_answer: '大题', program: '编程题' };
+    let hw = null;
+
+    document.getElementById('nav').innerHTML = renderNav('homeworks');
+
+    function fmtTime(s) {
+      return s ? new Date(s).toLocaleString('zh-CN') : '不限';
+    }
+    function parseOptions(q) {
+      try {
+        const o = typeof q.options === 'string' ? JSON.parse(q.options || '[]') : (q.options || []);
+        return Array.isArray(o) ? o : [];
+      } catch { return []; }
+    }
+    function windowText(h) {
+      if (!h.start_time && !h.end_time) return '不限时';
+      return `${fmtTime(h.start_time)} ~ ${fmtTime(h.end_time)}`;
+    }
+
+    async function load() {
+      try {
+        hw = await apiCall('GET', `/homeworks/${hwId}`);
+      } catch (err) {
+        document.getElementById('header').innerHTML = `<p class="text-red-500">${escapeHtml(err.message) || '加载失败'}</p>`;
+        return;
+      }
+      document.title = `${hw.title} - NoldOJ`;
+      renderHeader();
+      renderQuestions();
+      loadLeaderboard();
+      loadStats();
+      if (staff) loadGrading();
+    }
+
+    function renderHeader() {
+      const ended = hw.window_state === 'ended';
+      const buttons = [];
+      if (staff) {
+        buttons.push(`<a href="/pages/homework-edit.html?id=${hw.id}" class="px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">编辑</a>`);
+        buttons.push(`<button onclick="exportCsv('all')" class="px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">导出全员 CSV</button>`);
+      } else {
+        buttons.push(`<button onclick="exportCsv('mine')" class="px-3 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700">导出我的成绩单</button>`);
+      }
+      const answered = hw.questions.filter(q => (q.attempts_used || 0) > 0).length;
+      const bestTotal = hw.questions.reduce((s, q) => s + (Number(q.my_best_score) || 0), 0);
+      document.getElementById('header').innerHTML = `
+        <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-6">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h1 class="text-2xl font-bold text-gray-900 dark:text-white">📚 ${escapeHtml(hw.title)}</h1>
+              <div class="text-sm text-gray-500 dark:text-gray-400 mt-1">${escapeHtml(windowText(hw))} · 总分 ${hw.total_score || 0} · ${hw.questions.length} 题 · 创建者 ${escapeHtml(hw.creator_name || '')}</div>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">${buttons.join('')}</div>
+          </div>
+          ${hw.description ? `<div class="mt-4 text-gray-600 dark:text-gray-300 prose dark:prose-invert max-w-none prose-sm">${renderMarkdown(hw.description)}</div>` : ''}
+          ${staff ? `<div class="mt-3 text-sm text-indigo-600 dark:text-indigo-400">待批改 ${hw.pending_grading || 0} 份</div>`
+            : `<div class="mt-4 flex gap-6 text-sm text-gray-600 dark:text-gray-300">
+                 <span>已作答 <b>${answered}</b> / ${hw.questions.length}</span>
+                 <span>我的总分 <b>${bestTotal}</b> / ${hw.total_score || 0}</span>
+               </div>`}
+          ${ended ? '<div class="mt-3 text-sm text-red-500">作业已截止，不能再提交。</div>' : ''}
+        </div>`;
+    }
+
+    function renderQuestions() {
+      const ended = hw.window_state === 'ended';
+      document.getElementById('questions').innerHTML = hw.questions.map((q, i) => {
+        const remaining = q.remaining;
+        const exhausted = remaining !== null && remaining <= 0;
+        const locked = !staff && (ended || exhausted);
+        const limitText = q.max_submissions > 0 ? `已提交 ${q.attempts_used || 0}/${q.max_submissions} 次` : `已提交 ${q.attempts_used || 0} 次（不限次数）`;
+        let statusText = '';
+        if ((q.attempts_used || 0) > 0) {
+          if (q.my_last_status === 'pending') statusText = q.question_type === 'program' ? '⏳ 评测/批改中' : '⏳ 待教师批改';
+          else statusText = `最高分 <b>${q.my_best_score || 0}</b> / ${q.score || 0}`;
+        }
+        let body = '';
+        if (q.question_type === 'choice') {
+          const opts = parseOptions(q);
+          body = `<div class="space-y-2">${opts.map((opt, oi) => {
+            const letter = String.fromCharCode(65 + oi);
+            const checked = String(q.my_last_answer || '').toUpperCase() === letter ? 'checked' : '';
+            return `<label class="flex items-start gap-2 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+              <input type="radio" name="q_${q.id}" value="${letter}" ${checked} ${locked ? 'disabled' : ''} class="mt-1">
+              <span class="text-gray-700 dark:text-gray-300"><b>${letter}.</b> ${escapeHtml(opt)}</span>
+            </label>`;
+          }).join('')}</div>`;
+        } else if (q.question_type === 'true_false') {
+          const cur = String(q.my_last_answer || '').toLowerCase();
+          body = `<div class="flex gap-4">
+            <label class="flex items-center gap-2"><input type="radio" name="q_${q.id}" value="true" ${cur === 'true' ? 'checked' : ''} ${locked ? 'disabled' : ''}> 正确</label>
+            <label class="flex items-center gap-2"><input type="radio" name="q_${q.id}" value="false" ${cur === 'false' ? 'checked' : ''} ${locked ? 'disabled' : ''}> 错误</label>
+          </div>`;
+        } else if (q.question_type === 'fill_blank') {
+          body = `<input id="ans_${q.id}" type="text" value="${escapeHtml(q.my_last_answer || '')}" ${locked ? 'disabled' : ''} class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-900 dark:text-white" placeholder="填写答案">`;
+        } else if (q.question_type === 'long_answer') {
+          body = `<textarea id="ans_${q.id}" rows="4" ${locked ? 'disabled' : ''} class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-900 dark:text-white" placeholder="填写答案">${escapeHtml(q.my_last_answer || '')}</textarea>`;
+        } else if (q.question_type === 'program') {
+          body = `<div class="text-sm text-gray-600 dark:text-gray-300">
+              <div class="mb-2">题目：<b>${escapeHtml(q.problem_title || ('#' + q.problem_id))}</b> ${q.time_limit ? `· 时限 ${q.time_limit}ms` : ''} ${q.memory_limit ? `· 内存 ${q.memory_limit}MB` : ''}</div>
+              <a href="/pages/submit.html?id=${q.problem_id}&hw=${hw.id}&hq=${q.id}" class="inline-block px-4 py-2 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700">${locked ? '查看/提交记录' : '去提交代码'}</a>
+            </div>`;
+        }
+
+        const submitBtn = q.question_type === 'program' ? '' : `<button onclick="submitAnswer(${q.id})" ${locked ? 'disabled' : ''} class="px-4 py-2 text-sm rounded-xl font-semibold ${locked ? 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700'}">提交</button>`;
+
+        return `<div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-5">
+          <div class="flex items-start justify-between gap-3 mb-3">
+            <div class="flex-1">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="text-sm font-semibold text-gray-400">第 ${i + 1} 题</span>
+                <span class="px-2 py-0.5 text-xs rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300">${TYPE_LABEL[q.question_type] || q.question_type}</span>
+                <span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">${q.score || 0} 分</span>
+              </div>
+              <div class="text-gray-900 dark:text-white prose dark:prose-invert max-w-none prose-sm">${renderMarkdown(q.title)}</div>
+            </div>
+            <div class="text-xs text-gray-400 text-right flex-shrink-0">
+              <div>${limitText}</div>
+              ${statusText ? `<div class="mt-1 text-gray-500 dark:text-gray-400">${statusText}</div>` : ''}
+              ${q.my_comment ? `<div class="mt-1 text-emerald-600 dark:text-emerald-400">评语：${escapeHtml(q.my_comment)}</div>` : ''}
+            </div>
+          </div>
+          ${body}
+          ${submitBtn ? `<div class="mt-3 flex justify-end">${submitBtn}</div>` : ''}
+        </div>`;
+      }).join('');
+    }
+
+    async function submitAnswer(qid) {
+      const q = hw.questions.find(x => x.id === qid);
+      let answer = '';
+      if (q.question_type === 'choice' || q.question_type === 'true_false') {
+        const el = document.querySelector(`input[name="q_${qid}"]:checked`);
+        if (!el) return showToast('请先选择答案', 'error');
+        answer = el.value;
+      } else {
+        const el = document.getElementById(`ans_${qid}`);
+        answer = el ? el.value : '';
+      }
+      try {
+        const r = await apiCall('POST', `/homeworks/${hwId}/questions/${qid}/submit`, { answer });
+        showToast(r.grading_status === 'pending' ? '已提交，等待教师批改' : `已提交，得分 ${r.score}/${r.max_score}`, 'success');
+        load();
+      } catch (err) {
+        showToast(err.message || '提交失败', 'error');
+      }
+    }
+
+    async function exportCsv(scope) {
+      try {
+        await downloadCsv(`/homeworks/${hwId}/export.csv?scope=${scope}`, '作业成绩单.csv');
+      } catch (err) {
+        showToast(err.message || '导出失败', 'error');
+      }
+    }
+
+    async function loadLeaderboard() {
+      try {
+        const data = await apiCall('GET', `/homeworks/${hwId}/leaderboard`);
+        const rows = data.leaderboard || [];
+        document.getElementById('leaderboardSection').classList.remove('hidden');
+        if (rows.length === 0) {
+          document.getElementById('leaderboard').innerHTML = '<p class="p-5 text-gray-400 text-sm">暂无提交记录</p>';
+          return;
+        }
+        const medal = (r) => r === 1 ? '🥇' : r === 2 ? '🥈' : r === 3 ? '🥉' : r;
+        document.getElementById('leaderboard').innerHTML = `<table class="w-full text-sm min-w-[520px]">
+          <thead><tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700">
+            <th class="px-4 py-3">排名</th><th class="px-4 py-3">用户</th><th class="px-4 py-3">总分</th><th class="px-4 py-3">已答题数</th><th class="px-4 py-3">提交次数</th>
+          </tr></thead>
+          <tbody>${rows.map(r => `<tr class="${data.my && data.my.user_id === r.user_id ? 'bg-indigo-50/60 dark:bg-indigo-900/20' : ''} border-b border-gray-50 dark:border-gray-800">
+            <td class="px-4 py-2">${medal(r.rank)}</td>
+            <td class="px-4 py-2"><a href="/pages/profile.html?id=${r.user_id}" class="text-indigo-600 dark:text-indigo-400 hover:underline">${escapeHtml(r.nickname || r.username)}</a></td>
+            <td class="px-4 py-2 font-semibold">${r.total_score} / ${r.max_score}</td>
+            <td class="px-4 py-2 text-gray-500">${r.answered_questions}</td>
+            <td class="px-4 py-2 text-gray-500">${r.attempts}</td>
+          </tr>`).join('')}</tbody>
+        </table>`;
+      } catch {
+        document.getElementById('leaderboardSection').classList.add('hidden');
+      }
+    }
+
+    async function loadStats() {
+      try {
+        const s = await apiCall('GET', `/homeworks/${hwId}/stats`);
+        document.getElementById('statsSection').classList.remove('hidden');
+        const sum = s.summary || {};
+        document.getElementById('stats').innerHTML = `
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-4">
+            <div><div class="text-gray-400">参与人数</div><div class="text-lg font-bold text-gray-900 dark:text-white">${sum.participants || 0}</div></div>
+            <div><div class="text-gray-400">提交次数</div><div class="text-lg font-bold text-gray-900 dark:text-white">${sum.submissions || 0}</div></div>
+            <div><div class="text-gray-400">平均分</div><div class="text-lg font-bold text-gray-900 dark:text-white">${sum.average || 0}</div></div>
+            <div><div class="text-gray-400">最高分</div><div class="text-lg font-bold text-gray-900 dark:text-white">${sum.highest || 0}</div></div>
+          </div>
+          <div class="overflow-x-auto"><table class="w-full text-sm min-w-[560px]">
+            <thead><tr class="text-left text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700">
+              <th class="px-3 py-2">题目</th><th class="px-3 py-2">作答人数</th><th class="px-3 py-2">平均最高分</th><th class="px-3 py-2">满分人数</th><th class="px-3 py-2">待批改</th>
+            </tr></thead>
+            <tbody>${(s.questions || []).map(q => `<tr class="border-b border-gray-50 dark:border-gray-800">
+              <td class="px-3 py-2 max-w-[240px] truncate" title="${escapeHtml(q.title)}">${escapeHtml(q.title)}</td>
+              <td class="px-3 py-2">${q.answered}</td>
+              <td class="px-3 py-2">${q.average_best_score} / ${q.score}</td>
+              <td class="px-3 py-2">${q.full_marks}</td>
+              <td class="px-3 py-2">${q.pending_users}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>`;
+      } catch {
+        document.getElementById('statsSection').classList.add('hidden');
+      }
+    }
+
+    async function loadGrading() {
+      try {
+        const data = await apiCall('GET', `/homeworks/${hwId}/grading?status=pending&limit=100`);
+        const list = data.answers || [];
+        document.getElementById('gradingSection').classList.remove('hidden');
+        if (list.length === 0) {
+          document.getElementById('grading').innerHTML = '<p class="text-gray-400 text-sm">暂无待批改的主观题。</p>';
+          return;
+        }
+        document.getElementById('grading').innerHTML = list.map(a => `
+          <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 p-4">
+            <div class="text-sm text-gray-500 dark:text-gray-400 mb-2">
+              <b class="text-gray-900 dark:text-white">${escapeHtml(a.nickname || a.username)}</b>
+              · ${escapeHtml(a.question_title)} · 满分 ${a.question_max}
+            </div>
+            <div class="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap bg-gray-50 dark:bg-gray-900 rounded-xl p-3 mb-3">${escapeHtml(a.answer || '（空）')}</div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <input id="grade_score_${a.id}" type="number" min="0" max="${a.question_max}" step="0.5" placeholder="分数" class="w-24 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-900 dark:text-white">
+              <input id="grade_comment_${a.id}" type="text" placeholder="评语（可选）" class="flex-1 min-w-[160px] px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-900 dark:text-white">
+              <button onclick="gradeAnswer(${a.id}, ${a.question_max})" class="px-4 py-1.5 text-sm bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700">保存批改</button>
+            </div>
+          </div>`).join('');
+      } catch {
+        document.getElementById('gradingSection').classList.add('hidden');
+      }
+    }
+
+    async function gradeAnswer(aid, maxScore) {
+      const scoreEl = document.getElementById(`grade_score_${aid}`);
+      const commentEl = document.getElementById(`grade_comment_${aid}`);
+      const score = Number(scoreEl.value);
+      if (!Number.isFinite(score) || score < 0 || score > Number(maxScore)) {
+        return showToast(`分数需在 0 到 ${maxScore} 之间`, 'error');
+      }
+      try {
+        await apiCall('PUT', `/homeworks/${hwId}/answers/${aid}/grade`, { score, comment: commentEl.value });
+        showToast('批改已保存', 'success');
+        load();
+      } catch (err) {
+        showToast(err.message || '批改失败', 'error');
+      }
+    }
+
+    if (!hwId) {
+      document.getElementById('header').innerHTML = '<p class="text-red-500">缺少作业 id。</p>';
+    } else {
+      load();
+    }
+  </script>
+</body>
+</html>
